@@ -46,8 +46,8 @@ drawBitmap:
     *sub.l       CLIP_LEFT(sp),d3
     
     * Calculate the number of vertical pixels that need to be drawn
-    move.l      CLIP_BOTTOM(sp),d5
-    sub.l       CLIP_TOP(sp),d5
+    *move.l      CLIP_BOTTOM(sp),d5
+    *sub.l       CLIP_TOP(sp),d5
     
     move.l      POS_Y(sp),d2
     add.l       CLIP_BOTTOM(sp),d2
@@ -60,26 +60,28 @@ drawBitmap:
     lsl.l       #1,d1                           ; Multiply by 2
     add.l       d0,d1                           ; And add the current offset (for a total multiplication of 3, the number of color channels)
     *mulu.w      #NUMBER_OF_COLOR_CHANNELS,d1    ; Multiply by the number of color channels
-    add.l       d1,a0                           ; Increment the address for the bitmap data
     
     * Offset horizontal pixel color data that comes before the left clipping side
-    move.l      CLIP_LEFT(sp),d1
-    mulu.w      #NUMBER_OF_COLOR_CHANNELS,d1
-    add.l       d1,a0
+    move.l      CLIP_LEFT(sp),d0
+    mulu.w      #NUMBER_OF_COLOR_CHANNELS,d0
+    add.l       d0,d1
+    
+    add.l       d1,a0                           ; Increment the address for the bitmap data
+    
+    move.l      POS_X(sp),d5
+    add.l       CLIP_RIGHT(sp),d5                ; Add the leftmost position to the image width
     
     *add.l       d7,d2                       ; The vertical pen position should now start at the bottom of the bitmap to draw bottom to top
     *subi.l      #1,d2                       ; Subtract 1 from the vertical pen position, since we should have added 1 less than the bitmap height
 
-    * Begin processing the bitmap's image data in order to set the pen color
+* Begin processing the bitmap's image data in order to set the pen color
 SetPenColor:
-    
-    
     * D1.L is used by the TRAP code that sets the pen color
-    clr.l       d1                          ; Verify the register used to set the color is cleared
+    move.l      #0,d1
     move.b      (a0)+,d1                    ; Store the hex value for the color blue
-    lsl.l       #BITS_IN_BYTE,d1            ; Begin shifting bytes to accommodate for the green and red components
+    swap        d1
     move.b      (a0)+,d1                    ; Store the hex value for the color green
-    lsl.l       #BITS_IN_BYTE,d1            ; Shift one more byte to accommodate for the red component
+    rol.w       #BITS_IN_BYTE,d1
     move.b      (a0)+,d1                    ; Store the hex value for the color red
     
     * D1.L is now be in the format 0x00BBGGRR and is ready for use with the TRAP code that sets the pen color
@@ -97,44 +99,10 @@ SetPenColor:
 
 * Begin drawing pixels in the specified color     
 DrawHorizontalPixels:
-    *move.l      a4,a3                       ; Restore the original address of the ClippingCoordinates
-    
-    * Don't draw pixels outside of the left clipping plane
-    *cmp.l       CLIP_LEFT(sp),d3                   ; Comapre the horizontal position of the pen with the horizontal position of the clipping rectangle
-    *blt         NextPixel                   ; Skip drawing of pixel if it is not within the bounds of the clipping rectangle
-    
-    * Don't draw pixels above the top clipping plane
-    *cmp.l       CLIP_TOP(sp),d2
-    *blt         NextPixel
-    
-    * Don't draw pixels below the bottom clipping plane
-    *cmp.l       CLIP_BOTTOM(sp),d2
-    *bgt         NextPixel
-    
-    * Don't draw pixels outside of the right clipping plane
-    *cmp.l       CLIP_RIGHT(sp),d3
-    *bgt         NextPixel
-    
     TRAP        #15
-    
-NextPixel: 
-    *dbra        d3,SetPenColor
-   
-    *addi.l      #1,d3                       ; Increment the horizontal position by 1 pixel
-    *move.l      d6,d5                       ; Copy the bitmap width to perform operations on
-    *add.l       POS_X(sp),d5                   ; Add the leftmost position to the image width
-    *cmp.l       d5,d3                       ; Compare the horizontal position with the bitmap width and horizontal offset
-    *blt         SetPenColor
-    
-    
-    
     addi.l      #1,d3                       ; Increment the horizontal position by 1 pixel
-    *move.l      d6,d5                       ; Copy the bitmap width to perform operations on
-    move.l      POS_X(sp),d5
-    add.l       CLIP_RIGHT(sp),d5                ; Add the leftmost position to the image width
     cmp.l       d5,d3                       ; Compare the horizontal position with the bitmap width and horizontal offset
     blt         SetPenColor
-
 
 * Move up a row and continue drawing pixels
 DrawVerticalPixels:
@@ -143,21 +111,11 @@ DrawVerticalPixels:
     * Offset horizontal color data
     move.l      d6,d1                       ; Copy the bitmap width
     sub.l       CLIP_RIGHT(sp),d1
+    add.l       CLIP_LEFT(sp),d1
     mulu.w      #NUMBER_OF_COLOR_CHANNELS,d1
     add.l       d1,a0
-    
-    * Offset horizontal pixel color data that comes before the left clipping side
-    move.l      CLIP_LEFT(sp),d1
-    mulu.w      #NUMBER_OF_COLOR_CHANNELS,d1
-    add.l       d1,a0
-    
-    *add         POS_X(sp),d3
-    *add.l       POS_Y(sp),d5                   ; Add the topmost position to the image height
-    
-    *dbra        d5,SetPenColor
-    subi.l      #1,d2
-    move.l      d7,d5                       ; Copy the bitmap height to perform operations on
-    
+
+    subi.l      #1,d2 
     move.l      POS_Y(sp),d0
     add.l       CLIP_TOP(sp),d0
     cmp.l       d0,d2                       ; Compare the vertical position with the bitmap height and vertical offset
@@ -166,14 +124,11 @@ DrawVerticalPixels:
     movem.l     (sp)+,ALL_REGS          ; Restore the contents of each register
     rts
 
-* Reverse all bytes, changing the endianness
+* Reverse all bytes in d0, changing the register's endianness
 reverseBytes:
-    movem.l     d0,-(sp)
-    move.l      (sp),d0
     rol.w       #BITS_IN_BYTE,d0
     swap        d0
     rol.w       #BITS_IN_BYTE,d0
-    movem.l     (sp)+,d0
     rts  
 
 Start:
@@ -192,10 +147,9 @@ ReadBitmapHeader:
     add.l       #2,a0               ; Increment the address for the BitmapFile
     
     * Load the offset to image data, in bytes, and change its endianness
-    move.l      (a0)+,d4            
-    rol.w       #BITS_IN_BYTE,d4
-    swap        d4
-    rol.w       #BITS_IN_BYTE,d4
+    move.l      (a0)+,d0
+    jsr         reverseBytes
+    move.l      d0,d4
     
 * typedef struct {
 *    unsigned int size;               /* Header size in bytes      */
@@ -212,30 +166,16 @@ ReadBitmapInformationHeader:
     move.l      (a0)+,d5            ; Load the size of the header, in bytes, into a data register
     
     * Store the bitmap width and change its endianness
-    move.l      (a0)+,d6
-    rol.w       #BITS_IN_BYTE,d6
-    swap        d6
-    rol.w       #BITS_IN_BYTE,d6
+    move.l      (a0)+,d0
+    jsr         reverseBytes
+    move.l      d0,d6
     
     * Store the bitmap height and change its endianness
-    move.l      (a0)+,d7
-    rol.w       #BITS_IN_BYTE,d7
-    swap        d7
-    rol.w       #BITS_IN_BYTE,d7
+    move.l      (a0)+,d0
+    jsr         reverseBytes
+    move.l      d0,d7
     
-    *add.l      d4,a0
-    
-    * Dump the following data for now
-    * Note: instead of jumping directly to the location of the image data, we will iterate over each property
-    *       in preparation for supporting different formats of BMP files
-    move.w      (a0)+,d0            ; Number of color planes
-    move.w      (a0)+,d0            ; Bits per pixel
-    move.l      (a0)+,d0            ; Compression type
-    move.l      (a0)+,d0            ; Image size, in bytes
-    move.l      (a0)+,d0            ; Pixels per meter, x-axis
-    move.l      (a0)+,d0            ; Pixels per meter, y-axis
-    move.l      (a0)+,d0            ; Number of colors
-    move.l      (a0)+,d0            ; Important colors
+    add.l      d4,a0
 
 * Setup a window for the bitmap to be drawn in
 SetupWindow:
@@ -322,6 +262,7 @@ BitmapFile              INCBIN      "OriBitmap.bmp"
 StartingXDraw           ds.l        1
 
     END    START        ; last line of source
+
 
 
 
