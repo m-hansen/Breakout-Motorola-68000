@@ -32,8 +32,8 @@ drawBitmap:
     *add.l       d2,CLIP_BOTTOM(sp)
     *add.l       d3,CLIP_RIGHT(sp)
     
-    lea         BitmapWidth,a5          ; Load the address of BitmapWidth
-    move.l      d3,(a5)                 ; Store the bitmap width that was read from the header
+    move.l      a6,a0 ; Get the initial location of the bitmap
+    add.l       d4,a0 ; Add the offset to the bitmap address
     
     * Store the position to start drawing on the horizontal axis
     lea         StartingXDraw,a4
@@ -52,36 +52,35 @@ drawBitmap:
     move.l      POS_Y(sp),d2
     add.l       CLIP_BOTTOM(sp),d2
     
-    * Calculate the initial color data offset
+    * Calculate the initial vertical color data offset
     move.l      d7,d1                           ; Copy the bitmap height
     sub.l       CLIP_BOTTOM(sp),d1              ; Subtract the clipping bottom from the bitmap height
     mulu.w      d6,d1                           ; Multiply by the bitmap width
+    move.l      d1,d0                           ; Make a copy of the current offset
+    lsl.l       #1,d1                           ; Multiply by 2
+    add.l       d0,d1                           ; And add the current offset (for a total multiplication of 3, the number of color channels)
+    *mulu.w      #NUMBER_OF_COLOR_CHANNELS,d1    ; Multiply by the number of color channels
+    add.l       d1,a0                           ; Increment the address for the bitmap data
     
-    mulu.w      #NUMBER_OF_COLOR_CHANNELS,d1    ; Multiply by the number of color channels
-    lsr.l       #3,d1
-    
-    add.l       d1,a0                       ; Increment the address for the bitmap data
-    
+    * Offset horizontal pixel color data that comes before the left clipping side
+    move.l      CLIP_LEFT(sp),d1
+    mulu.w      #NUMBER_OF_COLOR_CHANNELS,d1
+    add.l       d1,a0
     
     *add.l       d7,d2                       ; The vertical pen position should now start at the bottom of the bitmap to draw bottom to top
     *subi.l      #1,d2                       ; Subtract 1 from the vertical pen position, since we should have added 1 less than the bitmap height
 
     * Begin processing the bitmap's image data in order to set the pen color
 SetPenColor:
-    * Offset horizontal pixel color data
-    move.l      CLIP_LEFT(sp),d1
-    mulu.w      #NUMBER_OF_COLOR_CHANNELS,d1
-    add.l       d1,a0
+    
     
     * D1.L is used by the TRAP code that sets the pen color
     clr.l       d1                          ; Verify the register used to set the color is cleared
     move.b      (a0)+,d1                    ; Store the hex value for the color blue
-    move.b      (a0)+,d4                    ; Store the hex value for the color green
-    move.b      (a0)+,d0                    ; Store the hex value for the color red
     lsl.l       #BITS_IN_BYTE,d1            ; Begin shifting bytes to accommodate for the green and red components
-    move.b      d4,d1                       ; Load the green component
+    move.b      (a0)+,d1                    ; Store the hex value for the color green
     lsl.l       #BITS_IN_BYTE,d1            ; Shift one more byte to accommodate for the red component
-    move.b      d0,d1                       ; Load the red component
+    move.b      (a0)+,d1                    ; Store the hex value for the color red
     
     * D1.L is now be in the format 0x00BBGGRR and is ready for use with the TRAP code that sets the pen color
     move.l      #PEN_COLOR_TRAP_CODE,d0     ; Load the TRAP code used to set the pen color
@@ -137,13 +136,18 @@ NextPixel:
     blt         SetPenColor
 
 
-* Move down a row and continue drawing pixels
+* Move up a row and continue drawing pixels
 DrawVerticalPixels:
     move.l      StartingXDraw,d3                   ; Reset the horizontal position back to its initial x position
 
     * Offset horizontal color data
     move.l      d6,d1                       ; Copy the bitmap width
     sub.l       CLIP_RIGHT(sp),d1
+    mulu.w      #NUMBER_OF_COLOR_CHANNELS,d1
+    add.l       d1,a0
+    
+    * Offset horizontal pixel color data that comes before the left clipping side
+    move.l      CLIP_LEFT(sp),d1
     mulu.w      #NUMBER_OF_COLOR_CHANNELS,d1
     add.l       d1,a0
     
@@ -174,6 +178,7 @@ reverseBytes:
 
 Start:
     lea         BitmapFile,a0       ; Load the address of the BitmapFile
+    move.l      a0,a6               ; Save a copy of the original location of the bitmap
     
 * Read the header data in the bitmap
 ReadBitmapHeader:
@@ -249,43 +254,43 @@ DrawBitmapSections:
     * Draw the top left quadrant
     move.l      #0,-(sp)                    ; Push the left clipping position onto the stack for use in the drawBitmap subroutine
     move.l      #0,-(sp)                    ; Push the top clipping position onto the stack
-    move.l      d7,d4                       ; Copy the bitmap height
-    lsr.l       #1,d4                       ; Divide by two
-    move.l      d4,-(sp)                    ; Push the bottom clipping position onto the stack
-    move.l      d6,d4                       ; Copy the bitmap width
-    lsr.l       #1,d4                       ; Divide by two
-    move.l      d4,-(sp)                    ; Push the right clipping position onto the stack
+    move.l      d7,d1                       ; Copy the bitmap height
+    lsr.l       #1,d1                       ; Divide by two
+    move.l      d1,-(sp)                    ; Push the bottom clipping position onto the stack
+    move.l      d6,d1                       ; Copy the bitmap width
+    lsr.l       #1,d1                       ; Divide by two
+    move.l      d1,-(sp)                    ; Push the right clipping position onto the stack
     move.l      #BITMAP_LEFT_X,-(sp)        ; Push the left coordinate to draw the bitmap onto the stack
     move.l      #BITMAP_TOP_Y,-(sp)         ; Push the top coordinate to draw the bitmap onto the stack
     jsr         drawBitmap
     add.l       #24,sp
     
     * Draw the top right quadrant
-    move.l      d6,d4                       ; Copy the bitmap width
-    lsr.l       #1,d4                       ; Divide by two
-    move.l      d4,-(sp)                    ; Push the left clipping position onto the stack for use in the drawBitmap subroutine
+    move.l      d6,d1                       ; Copy the bitmap width
+    lsr.l       #1,d1                       ; Divide by two
+    move.l      d1,-(sp)                    ; Push the left clipping position onto the stack for use in the drawBitmap subroutine
     move.l      #0,-(sp)                    ; Push the top clipping position onto the stack
-    move.l      d7,d4                       ; Copy the bitmap height
-    lsr.l       #1,d4                       ; Divide by two
-    move.l      d4,-(sp)                    ; Push the bottom clipping position onto the stack
-    move.l      d6,d4                       ; Copy the bitmap width
-    move.l      d4,-(sp)                    ; Push the right clipping position onto the stack
+    move.l      d7,d1                       ; Copy the bitmap height
+    lsr.l       #1,d1                       ; Divide by two
+    move.l      d1,-(sp)                    ; Push the bottom clipping position onto the stack
+    move.l      d6,d1                       ; Copy the bitmap width
+    move.l      d1,-(sp)                    ; Push the right clipping position onto the stack
     move.l      #BITMAP_LEFT_X,-(sp)        ; Push the left coordinate to draw the bitmap onto the stack
     move.l      #BITMAP_TOP_Y,-(sp)         ; Push the top coordinate to draw the bitmap onto the stack
     jsr         drawBitmap
     add.l       #24,sp
     
     * Draw the bottom right quadrant
-    move.l      d6,d4                       ; Copy the bitmap width
-    lsr.l       #1,d4                       ; Divide by two
-    move.l      d4,-(sp)                    ; Push the left clipping position onto the stack for use in the drawBitmap subroutine
-    move.l      d7,d4                       ; Copy the bitmap height
-    lsr.l       #1,d4                       ; Divide by two
-    move.l      d4,-(sp)                    ; Push the top clipping position onto the stack
-    move.l      d7,d4                       ; Copy the bitmap height
-    move.l      d4,-(sp)                    ; Push the bottom clipping position onto the stack
-    move.l      d6,d4                       ; Copy the bitmap width
-    move.l      d4,-(sp)                    ; Push the right clipping position onto the stack
+    move.l      d6,d1                       ; Copy the bitmap width
+    lsr.l       #1,d1                       ; Divide by two
+    move.l      d1,-(sp)                    ; Push the left clipping position onto the stack for use in the drawBitmap subroutine
+    move.l      d7,d1                       ; Copy the bitmap height
+    lsr.l       #1,d1                       ; Divide by two
+    move.l      d1,-(sp)                    ; Push the top clipping position onto the stack
+    move.l      d7,d1                       ; Copy the bitmap height
+    move.l      d1,-(sp)                    ; Push the bottom clipping position onto the stack
+    move.l      d6,d1                       ; Copy the bitmap width
+    move.l      d1,-(sp)                    ; Push the right clipping position onto the stack
     move.l      #BITMAP_LEFT_X,-(sp)        ; Push the left coordinate to draw the bitmap onto the stack
     move.l      #BITMAP_TOP_Y,-(sp)         ; Push the top coordinate to draw the bitmap onto the stack
     jsr         drawBitmap
@@ -293,14 +298,14 @@ DrawBitmapSections:
     
     * Draw the bottom left quadrant
     move.l      #0,-(sp)                    ; Push the left clipping position onto the stack for use in the drawBitmap subroutine
-    move.l      d7,d4                       ; Copy the bitmap height
-    lsr.l       #1,d4                       ; Divide by two
-    move.l      d4,-(sp)                    ; Push the top clipping position onto the stack
-    move.l      d7,d4                       ; Copy the bitmap height
-    move.l      d4,-(sp)                    ; Push the bottom clipping position onto the stack
-    move.l      d6,d4                       ; Copy the bitmap width
-    lsr.l       #1,d4                       ; Divide by two
-    move.l      d4,-(sp)                    ; Push the right clipping position onto the stack
+    move.l      d7,d1                       ; Copy the bitmap height
+    lsr.l       #1,d1                       ; Divide by two
+    move.l      d1,-(sp)                    ; Push the top clipping position onto the stack
+    move.l      d7,d1                       ; Copy the bitmap height
+    move.l      d1,-(sp)                    ; Push the bottom clipping position onto the stack
+    move.l      d6,d1                       ; Copy the bitmap width
+    lsr.l       #1,d1                       ; Divide by two
+    move.l      d1,-(sp)                    ; Push the right clipping position onto the stack
     move.l      #BITMAP_LEFT_X,-(sp)        ; Push the left coordinate to draw the bitmap onto the stack
     move.l      #BITMAP_TOP_Y,-(sp)         ; Push the top coordinate to draw the bitmap onto the stack
     jsr         drawBitmap
@@ -314,10 +319,7 @@ ErrorNotBitmap:
 * Put variables and constants here
                         ds.l        0
 BitmapFile              INCBIN      "OriBitmap.bmp"
-ClippingCoordinates     ds.l        4
-BitmapWidth             ds.l        1
 StartingXDraw           ds.l        1
-VerticalPixelsToDraw    ds.l        1
 
     END    START        ; last line of source
 
