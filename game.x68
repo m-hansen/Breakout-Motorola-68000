@@ -100,7 +100,7 @@ initialize:
     jsr         resetBall
     jsr         drawBall
 
-    move.w      #INITIAL_PADDLE_POSITION_X,PaddlePositionX
+    move.l      #INITIAL_PADDLE_POSITION_X,PaddlePositionX
     
     jsr         drawPaddle
     jsr         swapBuffers
@@ -159,6 +159,27 @@ update:
     bgt         ballReflectRightBound
     cmp.l       #OUTPUT_WINDOW_HEIGHT,d4
     bgt         loseLife
+    
+    * Check for a collision between the ball and paddle
+    * Pass in the location of the paddle as objectA
+    move.l      PaddlePositionX,d0
+    move.l      d0,-(sp)
+    move.l      #INITIAL_PADDLE_POSITION_Y,-(sp)
+    add.l       #PADDLE_WIDTH,d0
+    move.l      d0,-(sp)
+    move.l      #(INITIAL_PADDLE_POSITION_Y+PADDLE_HEIGHT),-(sp)
+    * Pass in the location of the ball as objectB
+    move.l      d1,-(sp)
+    move.l      d2,-(sp)
+    move.l      d3,-(sp)
+    move.l      d4,-(sp)
+    jsr         checkForCollision
+    add.l       #32,sp
+    
+    cmpi.l      #1,d0
+    bne         skipCollide
+    jsr         resetBall
+skipCollide:
     rts
     
 resetBall:
@@ -213,13 +234,13 @@ handleInput:
 checkLeftMovement:
     btst.l      #24,d1
     beq         checkRightMovement
-    move.w      -PaddleVelocityX,d0
-    add.w       d0,PaddlePositionX
+    move.l      -PaddleVelocityX,d0
+    add.l       d0,PaddlePositionX
 checkRightMovement:
     btst.l      #16,d1
     beq         checkLaunchKey
-    move.w      PaddleVelocityX,d0
-    add.w       d0,PaddlePositionX
+    move.l      PaddleVelocityX,d0
+    add.l       d0,PaddlePositionX
 checkLaunchKey:
     btst.l      #8,d1
     beq         noInput
@@ -257,7 +278,7 @@ drawBall:
 drawPaddle:
     movem.l     ALL_REG,-(sp)
     move.l      #DRAW_RECTANGLE_TRAP,d0
-    move.w      PaddlePositionX,d1
+    move.l      PaddlePositionX,d1
     move.w      #INITIAL_PADDLE_POSITION_Y,d2
     move.w      d1,d3                                               ; Copy the X paddle position
     addi.w      #PADDLE_WIDTH,d3
@@ -274,8 +295,8 @@ END:
 LoadingText         dc.l    'Loading...',0
 BallVelocityX       dc.l    1
 BallVelocityY       dc.l    1
-PaddlePositionX     ds.w    1
-PaddleVelocityX     dc.w    1
+PaddlePositionX     ds.l    1
+PaddleVelocityX     dc.l    1
 WasKeyPressed       ds.b    1
 SevenSegmentTable   dc.b    $3F
                     dc.b    $06
@@ -292,6 +313,8 @@ SevenSegmentTable   dc.b    $3F
                     include     "collisionDetection.x68"
 
     END    START        ; last line of source
+
+
 
 
 
