@@ -1,18 +1,15 @@
-    ORG    $1000
+    *ORG    $1000
     
 ALL_REGS                REG     D0-D7/A0-A6
 ALL_REGS_BYTES          EQU     60
 
-OUTPUT_WINDOW_TRAP_CODE EQU     33
+
 PEN_COLOR_TRAP_CODE     EQU     80
 DRAW_PIXEL_TRAP_CODE    EQU     82
 
-OUTPUT_WINDOW_WIDTH     EQU     1024
-OUTPUT_WINDOW_HEIGHT    EQU     768
-
 BITMAP_TYPE             EQU     $424D           ; All bitmaps should contain this hex value in the first 2 bytes
-BITMAP_LEFT_X           EQU     10             ; The leftmost coordinate for drawing the bitmap
-BITMAP_TOP_Y            EQU     10             ; The topmost coordinate for drawing the bitmap
+BITMAP_LEFT_X           EQU     ((OUTPUT_WINDOW_WIDTH>>1)-304)          ; The leftmost coordinate for drawing the bitmap
+BITMAP_TOP_Y            EQU     ((OUTPUT_WINDOW_HEIGHT>>1)-170)         ; The topmost coordinate for drawing the bitmap
 
 BITS_IN_BYTE                EQU     8
 NUMBER_OF_COLOR_CHANNELS    EQU     3
@@ -27,10 +24,6 @@ POS_Y           EQU     64
 
 drawBitmap:
     movem.l     ALL_REGS,-(sp)          ; Preserve the contents of each register
-    *add.l       d3,CLIP_LEFT(sp)
-    *add.l       d2,CLIP_TOP(sp)
-    *add.l       d2,CLIP_BOTTOM(sp)
-    *add.l       d3,CLIP_RIGHT(sp)
     
     move.l      a6,a0 ; Get the initial location of the bitmap
     add.l       d4,a0 ; Add the offset to the bitmap address
@@ -131,7 +124,7 @@ reverseBytes:
     rol.w       #BITS_IN_BYTE,d0
     rts  
 
-Start:
+Begin:
     lea         BitmapFile,a0       ; Load the address of the BitmapFile
     move.l      a0,a6               ; Save a copy of the original location of the bitmap
     
@@ -176,14 +169,6 @@ ReadBitmapInformationHeader:
     move.l      d0,d7
     
     add.l      d4,a0
-
-* Setup a window for the bitmap to be drawn in
-SetupWindow:
-    move.l      #OUTPUT_WINDOW_WIDTH,d1
-    swap.w      d1
-    move.w      #OUTPUT_WINDOW_HEIGHT,d1
-    move.w      #OUTPUT_WINDOW_TRAP_CODE,d0
-    TRAP        #15
     
 LoadBitmapStartCoordinate:
     * Starting coordinate to begin drawing pixels at
@@ -254,14 +239,18 @@ DrawBitmapSections:
 * The file is not a bitmap, terminate the program
 ErrorNotBitmap:
 
-    SIMHALT             ; halt simulator
-
+    *SIMHALT             ; halt simulator
+    rts
 * Put variables and constants here
                         ds.l        0
 BitmapFile              INCBIN      "OriBitmap.bmp"
 StartingXDraw           ds.l        1
 
-    END    START        ; last line of source
+    *END    Begin        ; last line of source
+
+
+
+
 
 
 
