@@ -15,8 +15,10 @@ ENABLE_DOUBLE_BUFFERING     equ     17
 CLEAR_SCREEN_MAGIC_NUMBER   equ     $FF00
 
 * TRAP commands
+GET_TIME_TRAP               equ     8
 CLEAR_SCREEN_TRAP           equ     11
 KEY_PRESS_TRAP              equ     19
+RETURN_CYCLE_COUNT_TRAP     equ     31
 OUTPUT_WINDOW_TRAP          equ     33
 SET_PEN_COLOR_TRAP          equ     80
 SET_FILL_COLOR_TRAP         equ     81
@@ -26,12 +28,13 @@ SET_DRAWING_MODE_TRAP       equ     92
 REPAINT_SCREEN_TRAP         equ     94
 DRAW_STRING_GRAPHIC_TRAP    equ     95
 
-OUTPUT_WINDOW_WIDTH         equ     1024
-OUTPUT_WINDOW_HEIGHT        equ     768
+OUTPUT_WINDOW_WIDTH         equ     1280
+OUTPUT_WINDOW_HEIGHT        equ     720
 
 * Colors
 COLOR_BLACK                 equ     $00000000
 COLOR_BLUE                  equ     $00FF0000
+COLOR_PURPLE                equ     $00800080
 COLOR_RED                   equ     $000000FF
 COLOR_WHITE                 equ     $00FFFFFF
 
@@ -41,20 +44,26 @@ FILL_COLOR                  equ     (ALL_REG_SIZE_IN_BYTES+4)
 PADDLE_WIDTH                equ     125
 PADDLE_HEIGHT               equ     15
 PADDLE_SPEED                equ     1
+PADDLE_BORDER_COLOR         equ     COLOR_BLACK
+PADDLE_FILL_COLOR           equ     COLOR_WHITE
 INITIAL_PADDLE_POSITION_X   equ     ((OUTPUT_WINDOW_WIDTH>>1)-(PADDLE_WIDTH>>1))
 INITIAL_PADDLE_POSITION_Y   equ     (OUTPUT_WINDOW_HEIGHT-20)
 
 BRICK_WIDTH                 equ     128
-BRICK_HEIGHT                equ     40
+BRICK_HEIGHT                equ     30
 NUMBER_OF_BRICK_ROWS        equ     4
 
 BALL_DIAMETER               equ     20
+BALL_BORDER_COLOR           equ     COLOR_WHITE
+BALL_FILL_COLOR             equ     COLOR_PURPLE
 
 LEFT_ARROW_KEY_CODE         equ     $25
 UP_ARROW_KEY_CODE           equ     $26
 RIGHT_ARROW_KEY_CODE        equ     $27
 DOWN_ARROW_KEY_CODE         equ     $28
 SPACEBAR_KEY_CODE           equ     $32
+
+LARGE_NUMBER_FOR_SEED       equ     $5678
 
 * Argument stack offsets for use with collision detection function
 COLLISION_OBJ_A_LEFT        equ     (ALL_REG_SIZE_IN_BYTES+32)
@@ -92,28 +101,18 @@ initialize:
     jsr         swapBuffers
     
     * Load the background bitmap
-    jsr Begin
+    jsr         LoadBitmap
     jsr         swapBuffers
-    
-    * Draw a circle
-    move.l      #COLOR_WHITE,-(sp)
-    jsr         setPenColorA
-    add.l       #4,sp
-    
-    move.l      #COLOR_RED,-(sp)
-    jsr         setFillColor
-    add.l       #4,sp
     
     * Initialize ball position and velocity
     jsr         resetBall
-    jsr         drawBall
 
+    * Initialize paddle position
     move.l      #INITIAL_PADDLE_POSITION_X,PaddlePositionX
     
-    jsr         drawPaddle
-    jsr         swapBuffers
-    
-    *jmp         END
+    * Display the bricks
+    jsr         seedRandomNumber
+    jsr         drawAllBricks
 
 gameLoop:
     *jsr clearScreen
@@ -144,20 +143,6 @@ update:
     add.l       d6,d3
     add.l       d7,d4
     
-    * Check for collision between ball and paddle
-    * Pass in the bounds of the ball
-    move.l      d1,-(sp)
-    move.l      d2,-(sp)
-    move.l      d3,-(sp)
-    move.l      d4,-(sp)
-    * Pass in the bounds of the paddle
-    move.l      d1,-(sp)
-    move.l      d2,-(sp)
-    move.l      d3,-(sp)
-    move.l      d4,-(sp)
-    jsr         checkForCollision
-    add.l       #32,sp
-    
     * Check if the ball is within the bounds of the screen
     cmp.l       #0,d2
     blt         ballReflectTopBound
@@ -168,9 +153,21 @@ update:
     cmp.l       #OUTPUT_WINDOW_HEIGHT,d4
     bgt         loseLife
     
+    * Keep the paddle within the bounds of the screen
+    lea         PaddlePositionX,a4
+    cmpi.l      #0,(a4)                                     ; Check to see if the paddle has exceeded the left bounds
+    blt         positionPaddleOnLeft
+    cmp.l       #(OUTPUT_WINDOW_WIDTH-PADDLE_WIDTH),(a4)    ; Check to see if the paddle has exceeded the right bounds
+    ble         paddleInBounds
+    move.l      #(OUTPUT_WINDOW_WIDTH-PADDLE_WIDTH),(a4)    ; Re-position the paddle on the right side of the screen
+    jmp         paddleInBounds
+positionPaddleOnLeft:
+    move.l      #0,(a4)                                     ; Re-position the paddle on the left side of the screen
+paddleInBounds:
+    
     * Check for a collision between the ball and paddle
     * Pass in the location of the paddle as objectA
-    move.l      PaddlePositionX,d0
+    move.l      (a4),d0                                     ; Make a copy of PaddlePositionX
     move.l      d0,-(sp)
     move.l      #INITIAL_PADDLE_POSITION_Y,-(sp)
     add.l       #PADDLE_WIDTH,d0
@@ -184,10 +181,11 @@ update:
     jsr         checkForCollision
     add.l       #32,sp
     
-    cmpi.l      #1,d0
+    cmpi.l      #1,d0               ; The return value from the collision check will be located in register d0, 1 indicates a collision occurred
     bne         skipCollide
     jsr         resetBall
 skipCollide:
+
     rts
     
 resetBall:
@@ -230,7 +228,6 @@ loseLife:
 draw:
     jsr drawBall
     jsr drawPaddle
-    jsr drawAllBricks
     rts
     
 handleInput:
@@ -257,7 +254,7 @@ noInput:
     movem.l     (sp)+,ALL_REG
     rts
     
-setPenColorA:
+setPenColor:
     movem.l     ALL_REG,-(sp)
     move.l      #SET_PEN_COLOR_TRAP,d0
     move.l      PEN_COLOR(sp),d1
@@ -276,6 +273,17 @@ setFillColor:
 drawBall:
     *movem.l     ALL_REG,-(sp)
     move.l      #DRAW_ELLIPSE_TRAP,d0
+    
+    * Set the ball border color
+    move.l      #BALL_BORDER_COLOR,-(sp)
+    jsr         setPenColor
+    add.l       #4,sp
+    
+    * Set the ball fill color
+    move.l      #BALL_FILL_COLOR,-(sp)
+    jsr         setFillColor
+    add.l       #4,sp
+    
    * move.w      #0,d1
    * move.w      #0,d2
    * move.w      #BALL_DIAMETER,d3
@@ -292,7 +300,6 @@ drawAllBricks:
     subi.l      #1,d0                                       ; Immediately dectement the horizontal loop counter so it won't exceed the bounds
     move.l      d7,d1                                       ; The vertical counter to be decremented
     subi.l      #1,d1                                       ; Immediately dectement the vertical loop counter so it won't exceed the bounds
-    
 drawHorizontalBricks:
     move.l      d0,d4                                       ; Copy the horizontal counter
     mulu.w      #BRICK_WIDTH,d4                             ; Multiply by the width to get the horizontal position
@@ -303,7 +310,6 @@ drawHorizontalBricks:
     jsr         drawBrick
     add.l       #8,sp
     dbra        d0,drawHorizontalBricks
-    
 drawVerticalBricks:
     move.l      d6,d0
     subi.l      #1,d0                                       ; Reset the horizontal counter
@@ -312,9 +318,22 @@ drawVerticalBricks:
     rts
 
 * Draw an individual brick
-* d4 is used for the X position, d5 is used for the Y position
 drawBrick:
     movem.l     ALL_REG,-(sp)
+    
+    * Set the paddle border color
+    move.l      #COLOR_WHITE,-(sp)
+    jsr         setPenColor
+    add.l       #4,sp
+    
+    * Set the paddle fill color
+    jsr         getRandomLongIntoD6
+    lsl.l       #BITS_IN_BYTE,d6                ; Shift left (then right in the next instruction) to clear the alpha value
+    lsr.l       #BITS_IN_BYTE,d6                ; This gives a more balanced result than immediately shifting right due to the nature of the random function
+    move.l      d6,-(sp)
+    jsr         setFillColor
+    add.l       #4,sp
+    
     move.l      #DRAW_RECTANGLE_TRAP,d0
     move.l      BRICK_POSITION_X(sp),d1
     move.l      BRICK_POSITION_Y(sp),d2
@@ -328,6 +347,18 @@ drawBrick:
     
 drawPaddle:
     movem.l     ALL_REG,-(sp)
+    
+    * Set the paddle border color
+    move.l      #PADDLE_BORDER_COLOR,-(sp)
+    jsr         setPenColor
+    add.l       #4,sp
+    
+    * Set the paddle fill color
+    move.l      #PADDLE_FILL_COLOR,-(sp)
+    jsr         setFillColor
+    add.l       #4,sp
+    
+    * Draw the paddle
     move.l      #DRAW_RECTANGLE_TRAP,d0
     move.l      PaddlePositionX,d1
     move.w      #INITIAL_PADDLE_POSITION_Y,d2
@@ -335,8 +366,37 @@ drawPaddle:
     addi.w      #PADDLE_WIDTH,d3
     move.w      #(INITIAL_PADDLE_POSITION_Y+PADDLE_HEIGHT),d4
     TRAP        #15
+    
     movem.l     (sp)+,ALL_REG
     rts
+    
+seedRandomNumber
+    movem.l     ALL_REG,-(sp)
+    clr.l       d6
+    move.b      #GET_TIME_TRAP,d0
+    TRAP        #15
+    move.l      d1,d6
+    mulu        #LARGE_NUMBER_FOR_SEED,d6
+    move.l      d6,RandomNumberSeed
+    movem.l     (sp)+,ALL_REG
+    rts
+
+getRandomLongIntoD6:
+    movem.l     d0,-(sp)
+    movem.l     d1,-(sp)
+    move.l      RandomNumberSeed,d6
+    mulu        #LARGE_NUMBER_FOR_SEED,d6
+    move.l      #RETURN_CYCLE_COUNT_TRAP,d0
+    TRAP        #15
+    mulu        d1,d6
+    bcs         nocarry
+    add.l       #1,d6
+nocarry:
+    move.l      d6,RandomNumberSeed
+    movem.l     (sp)+,d1
+    movem.l     (sp)+,d0
+    rts
+
 
 END:
     SIMHALT             ; halt simulator
@@ -344,26 +404,23 @@ END:
 * Put variables and constants here
     
 LoadingText         dc.l    'Loading...',0
-BallVelocityX       dc.l    1
-BallVelocityY       dc.l    1
+RandomNumberSeed    ds.l    1
+BallPositionX       ds.l    1
+BallPositionY       ds.l    1
+BallVelocityX       dc.l    0
+BallVelocityY       dc.l    0
 PaddlePositionX     ds.l    1
 PaddleVelocityX     dc.l    1
 WasKeyPressed       ds.b    1
-SevenSegmentTable   dc.b    $3F
-                    dc.b    $06
-                    dc.b    $5B
-                    dc.b    $4F
-                    dc.b    $66
-                    dc.b    $6D
-                    dc.b    $7D
-                    dc.b    $27
-                    dc.b    $7F
-                    dc.b    $6F
+SevenSegmentTable   dc.b    $3F,$06,$5B,$4F,$66,$6D,$7D,$27,$7F,$6F
                     ds.l    0
                     include     "drawBitmap.x68"
                     include     "collisionDetection.x68"
 
     END    START        ; last line of source
+
+
+
 
 
 

@@ -8,8 +8,8 @@ PEN_COLOR_TRAP_CODE     EQU     80
 DRAW_PIXEL_TRAP_CODE    EQU     82
 
 BITMAP_TYPE             EQU     $424D           ; All bitmaps should contain this hex value in the first 2 bytes
-BITMAP_LEFT_X           EQU     ((OUTPUT_WINDOW_WIDTH>>1)-304)          ; The leftmost coordinate for drawing the bitmap
-BITMAP_TOP_Y            EQU     ((OUTPUT_WINDOW_HEIGHT>>1)-170)         ; The topmost coordinate for drawing the bitmap
+BITMAP_LEFT_X           EQU     0               ; The leftmost coordinate for drawing the bitmap
+BITMAP_TOP_Y            EQU     0               ; The topmost coordinate for drawing the bitmap
 
 BITS_IN_BYTE                EQU     8
 NUMBER_OF_COLOR_CHANNELS    EQU     3
@@ -68,7 +68,7 @@ drawBitmap:
     *subi.l      #1,d2                       ; Subtract 1 from the vertical pen position, since we should have added 1 less than the bitmap height
 
 * Begin processing the bitmap's image data in order to set the pen color
-SetPenColor:
+AdjustPenColor:
     * D1.L is used by the TRAP code that sets the pen color
     move.l      #0,d1
     move.b      (a0)+,d1                    ; Store the hex value for the color blue
@@ -82,20 +82,14 @@ SetPenColor:
     TRAP        #15
     
     move.l      #DRAW_PIXEL_TRAP_CODE,d0    ; Load the TRAP code used to draw pixels in the pen color
-    *add.l       (a4),d3
-    *add.l       POS_X(sp),d3
     move.l      d3,d1                       ; Store the horizontal position for use with the draw pixel TRAP code
-    *add.l       CLIP_LEFT(sp),d1
-    *add.l       POS_Y(sp),d5
-    *move.w      d5,d2                                        ; Note: the vertical position is already in the proper register for the draw TRAP code
-    *add.l       CLIP_LEFT(sp),d2
 
 * Begin drawing pixels in the specified color     
 DrawHorizontalPixels:
     TRAP        #15
     addi.l      #1,d3                       ; Increment the horizontal position by 1 pixel
     cmp.l       d5,d3                       ; Compare the horizontal position with the bitmap width and horizontal offset
-    blt         SetPenColor
+    blt         AdjustPenColor
 
 * Move up a row and continue drawing pixels
 DrawVerticalPixels:
@@ -112,7 +106,7 @@ DrawVerticalPixels:
     move.l      POS_Y(sp),d0
     add.l       CLIP_TOP(sp),d0
     cmp.l       d0,d2                       ; Compare the vertical position with the bitmap height and vertical offset
-    bgt         SetPenColor
+    bgt         AdjustPenColor
 
     movem.l     (sp)+,ALL_REGS          ; Restore the contents of each register
     rts
@@ -124,7 +118,7 @@ reverseBytes:
     rol.w       #BITS_IN_BYTE,d0
     rts  
 
-Begin:
+LoadBitmap:
     lea         BitmapFile,a0       ; Load the address of the BitmapFile
     move.l      a0,a6               ; Save a copy of the original location of the bitmap
     
@@ -243,10 +237,13 @@ ErrorNotBitmap:
     rts
 * Put variables and constants here
                         ds.l        0
-BitmapFile              INCBIN      "OriBitmap.bmp"
+BitmapFile              INCBIN      "OriBackground.bmp"
 StartingXDraw           ds.l        1
 
     *END    Begin        ; last line of source
+
+
+
 
 
 
