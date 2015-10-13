@@ -44,6 +44,10 @@ PADDLE_SPEED                equ     1
 INITIAL_PADDLE_POSITION_X   equ     ((OUTPUT_WINDOW_WIDTH>>1)-(PADDLE_WIDTH>>1))
 INITIAL_PADDLE_POSITION_Y   equ     (OUTPUT_WINDOW_HEIGHT-20)
 
+BRICK_WIDTH                 equ     128
+BRICK_HEIGHT                equ     40
+NUMBER_OF_BRICK_ROWS        equ     4
+
 BALL_DIAMETER               equ     20
 
 LEFT_ARROW_KEY_CODE         equ     $25
@@ -61,6 +65,10 @@ COLLISION_OBJ_B_LEFT        equ     (ALL_REG_SIZE_IN_BYTES+16)
 COLLISION_OBJ_B_TOP         equ     (ALL_REG_SIZE_IN_BYTES+12)
 COLLISION_OBJ_B_RIGHT       equ     (ALL_REG_SIZE_IN_BYTES+8)
 COLLISION_OBJ_B_BOTTOM      equ     (ALL_REG_SIZE_IN_BYTES+4)
+
+* Stack offset for drawing bricks
+BRICK_POSITION_X            equ     (ALL_REG_SIZE_IN_BYTES+8)
+BRICK_POSITION_Y            equ     (ALL_REG_SIZE_IN_BYTES+4)
 
 initialize:
     * Resize output window
@@ -222,6 +230,7 @@ loseLife:
 draw:
     jsr drawBall
     jsr drawPaddle
+    jsr drawAllBricks
     rts
     
 handleInput:
@@ -275,6 +284,48 @@ drawBall:
     *movem.l     (sp)+,ALL_REG
     rts
     
+drawAllBricks:
+    movem.l     ALL_REG,-(sp)
+    move.l      #(OUTPUT_WINDOW_WIDTH/BRICK_WIDTH),d6       ; Number of bricks to draw horizontally
+    move.l      #NUMBER_OF_BRICK_ROWS,d7                    ; Number of bricks to draw vertically
+    move.l      d6,d0                                       ; The horizontal counter to be decremented
+    subi.l      #1,d0                                       ; Immediately dectement the horizontal loop counter so it won't exceed the bounds
+    move.l      d7,d1                                       ; The vertical counter to be decremented
+    subi.l      #1,d1                                       ; Immediately dectement the vertical loop counter so it won't exceed the bounds
+    
+drawHorizontalBricks:
+    move.l      d0,d4                                       ; Copy the horizontal counter
+    mulu.w      #BRICK_WIDTH,d4                             ; Multiply by the width to get the horizontal position
+    move.l      d1,d5                                       ; Copy the vertical counter
+    mulu.w      #BRICK_HEIGHT,d5                            ; Multiply by the height to get the vertical position
+    move.l      d4,-(sp)
+    move.l      d5,-(sp)
+    jsr         drawBrick
+    add.l       #8,sp
+    dbra        d0,drawHorizontalBricks
+    
+drawVerticalBricks:
+    move.l      d6,d0
+    subi.l      #1,d0                                       ; Reset the horizontal counter
+    dbra        d1,drawHorizontalBricks
+    movem.l     (sp)+,ALL_REG
+    rts
+
+* Draw an individual brick
+* d4 is used for the X position, d5 is used for the Y position
+drawBrick:
+    movem.l     ALL_REG,-(sp)
+    move.l      #DRAW_RECTANGLE_TRAP,d0
+    move.l      BRICK_POSITION_X(sp),d1
+    move.l      BRICK_POSITION_Y(sp),d2
+    move.l      d1,d3                           ; Copy the x position
+    add.l       #BRICK_WIDTH,d3                 ; Add the width
+    move.l      d2,d4                           ; Copy the y position
+    add.l       #BRICK_HEIGHT,d4                ; Add the height
+    TRAP        #15
+    movem.l     (sp)+,ALL_REG
+    rts
+    
 drawPaddle:
     movem.l     ALL_REG,-(sp)
     move.l      #DRAW_RECTANGLE_TRAP,d0
@@ -313,6 +364,7 @@ SevenSegmentTable   dc.b    $3F
                     include     "collisionDetection.x68"
 
     END    START        ; last line of source
+
 
 
 
