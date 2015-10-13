@@ -61,7 +61,7 @@ LEFT_ARROW_KEY_CODE         equ     $25
 UP_ARROW_KEY_CODE           equ     $26
 RIGHT_ARROW_KEY_CODE        equ     $27
 DOWN_ARROW_KEY_CODE         equ     $28
-SPACEBAR_KEY_CODE           equ     $32
+SPACEBAR_KEY_CODE           equ     ' '
 
 LARGE_NUMBER_FOR_SEED       equ     $5678
 
@@ -105,6 +105,8 @@ initialize:
     jsr         swapBuffers
     
     * Initialize ball position and velocity
+    lea         BallVelocityX,a5
+    lea         BallVelocityY,a6
     jsr         resetBall
 
     * Initialize paddle position
@@ -138,19 +140,19 @@ swapBuffers:
     
 update:
     * Update the ball position
+    move.l      BallVelocityX,d6
+    move.l      BallVelocityY,d7
     add.l       d6,d1
     add.l       d7,d2
-    add.l       d6,d3
-    add.l       d7,d4
     
     * Check if the ball is within the bounds of the screen
     cmp.l       #0,d2
     blt         ballReflectTopBound
     cmp.l       #0,d1
     blt         ballReflectLeftBound
-    cmp.l       #OUTPUT_WINDOW_WIDTH,d3
+    cmp.l       #(OUTPUT_WINDOW_WIDTH-BALL_DIAMETER),d1
     bgt         ballReflectRightBound
-    cmp.l       #OUTPUT_WINDOW_HEIGHT,d4
+    cmp.l       #(OUTPUT_WINDOW_HEIGHT-BALL_DIAMETER),d2
     bgt         loseLife
     
     * Keep the paddle within the bounds of the screen
@@ -176,7 +178,11 @@ paddleInBounds:
     * Pass in the location of the ball as objectB
     move.l      d1,-(sp)
     move.l      d2,-(sp)
+    move.l      d1,d3                   ; Copy the X position
+    addi.l       #BALL_DIAMETER,d3       ; Account for the size
     move.l      d3,-(sp)
+    move.l      d2,d4                   ; Copy the y position
+    addi.l       #BALL_DIAMETER,d4       ; Account for the size
     move.l      d4,-(sp)
     jsr         checkForCollision
     add.l       #32,sp
@@ -189,8 +195,8 @@ skipCollide:
     rts
     
 resetBall:
-    move.l      BallVelocityX,d6
-    move.l      BallVelocityY,d7
+    move.l      #0,BallVelocityX
+    move.l      #0,BallVelocityY
     move.w      #((OUTPUT_WINDOW_WIDTH>>1)-(BALL_DIAMETER>>1)),d1
     move.w      #((OUTPUT_WINDOW_HEIGHT>>1)-(BALL_DIAMETER>>1)),d2
     move.w      d1,d3
@@ -199,30 +205,29 @@ resetBall:
     add.l       #BALL_DIAMETER,d4
     rts
     
-reverseBallVelocityX:
-    muls.w      #-1,d7
-    move.l      #OUTPUT_WINDOW_WIDTH,d4
-    rts
-    
 ballReflectLeftBound:
     muls.w      #-1,d6
+    move.l      d6,BallVelocityX
     move.l      #0,d1
     rts
     
 ballReflectRightBound:
     muls.w      #-1,d6
-    move.l      #OUTPUT_WINDOW_WIDTH,d3
+    move.l      d6,BallVelocityX
+    move.l      #(OUTPUT_WINDOW_WIDTH-BALL_DIAMETER),d1
     rts
     
 ballReflectTopBound:
     muls.w      #-1,d7
-    move.l      #0,d4
+    move.l      d7,BallVelocityY
+    move.l      #0,d2
     rts
     
 loseLife:
 * TODO decrement lives, end game if zero, reset ball and paddle position
     muls.w      #-1,d7
-    move.l      #OUTPUT_WINDOW_HEIGHT,d4
+    move.l      d7,BallVelocityY
+    move.l      #(OUTPUT_WINDOW_HEIGHT-BALL_DIAMETER),d2
     rts
     
 draw:
@@ -233,7 +238,7 @@ draw:
 handleInput:
     movem.l     ALL_REG,-(sp)
     move.l      #KEY_PRESS_TRAP,d0
-    move.l      #(LEFT_ARROW_KEY_CODE<<24+RIGHT_ARROW_KEY_CODE<<16+SPACEBAR_KEY_CODE<<8),d1
+    move.l      #(LEFT_ARROW_KEY_CODE<<24+RIGHT_ARROW_KEY_CODE<<16+SPACEBAR_KEY_CODE<<8+'R'),d1
     TRAP        #15
     cmpi.l      #0,d1
     beq         noInput
@@ -249,7 +254,13 @@ checkRightMovement:
     add.l       d0,PaddlePositionX
 checkLaunchKey:
     btst.l      #8,d1
-    beq         noInput
+    beq         checkResetKey
+    move.l      #1,d0
+    move.l      d0,BallVelocityX
+    move.l      d0,BallVelocityY
+checkResetKey:
+    btst.l      #0,d1
+    bne         initialize        
 noInput:
     movem.l     (sp)+,ALL_REG
     rts
@@ -407,8 +418,8 @@ LoadingText         dc.l    'Loading...',0
 RandomNumberSeed    ds.l    1
 BallPositionX       ds.l    1
 BallPositionY       ds.l    1
-BallVelocityX       dc.l    0
-BallVelocityY       dc.l    0
+BallVelocityX       ds.l    1
+BallVelocityY       ds.l    1
 PaddlePositionX     ds.l    1
 PaddleVelocityX     dc.l    1
 WasKeyPressed       ds.b    1
@@ -418,6 +429,7 @@ SevenSegmentTable   dc.b    $3F,$06,$5B,$4F,$66,$6D,$7D,$27,$7F,$6F
                     include     "collisionDetection.x68"
 
     END    START        ; last line of source
+
 
 
 
