@@ -138,12 +138,41 @@ swapBuffers:
     TRAP        #15
     rts
     
+* Calculate the inval rect   
+calculateBallInvalRect:
+    movem.l     ALL_REG,-(sp)
+    move.l      #1,d0               ; Used as padding around the inval rectangle
+    
+    * Adjust padding for each side
+    sub.l       d0,d1
+    sub.l       d0,d2
+    add.l       d0,d3
+    add.l       d0,d4
+    
+    move.l      d1,-(sp)
+    move.l      d2,-(sp)
+    move.l      d4,-(sp)
+    move.l      d3,-(sp)
+    move.l      #BITMAP_LEFT_X,-(sp)
+    move.l      #BITMAP_TOP_Y,-(sp)
+    jsr         drawBitmap
+    add.l       #24,sp
+    movem.l     (sp)+,ALL_REG
+    rts
+    
 update:
     * Update the ball position
     move.l      BallVelocityX,d6
     move.l      BallVelocityY,d7
-    add.l       d6,d1
-    add.l       d7,d2
+    
+    * Check if the ball is moving
+    cmpi.l      #0,d6
+    bne         bkgUpdateNeeded
+    cmpi.l      #0,d7
+    beq         noBkgUpdateNeeded
+bkgUpdateNeeded:
+    jsr calculateBallInvalRect
+noBkgUpdateNeeded:    
     
     * Check if the ball is within the bounds of the screen
     cmp.l       #0,d2
@@ -154,6 +183,9 @@ update:
     bgt         ballReflectRightBound
     cmp.l       #(OUTPUT_WINDOW_HEIGHT-BALL_DIAMETER),d2
     bgt         loseLife
+    
+    add.l       d6,d1
+    add.l       d7,d2
     
     * Keep the paddle within the bounds of the screen
     lea         PaddlePositionX,a4
@@ -179,15 +211,15 @@ paddleInBounds:
     move.l      d1,-(sp)
     move.l      d2,-(sp)
     move.l      d1,d3                   ; Copy the X position
-    addi.l       #BALL_DIAMETER,d3       ; Account for the size
+    addi.l      #BALL_DIAMETER,d3       ; Account for the size
     move.l      d3,-(sp)
     move.l      d2,d4                   ; Copy the y position
-    addi.l       #BALL_DIAMETER,d4       ; Account for the size
+    addi.l      #BALL_DIAMETER,d4       ; Account for the size
     move.l      d4,-(sp)
     jsr         checkForCollision
     add.l       #32,sp
     
-    cmpi.l      #1,d0               ; The return value from the collision check will be located in register d0, 1 indicates a collision occurred
+    cmpi.l      #1,d0                   ; The return value from the collision check will be located in register d0, 1 indicates a collision occurred
     bne         skipCollide
     jsr         resetBall
 skipCollide:
@@ -408,7 +440,6 @@ nocarry:
     movem.l     (sp)+,d0
     rts
 
-
 END:
     SIMHALT             ; halt simulator
 
@@ -429,6 +460,7 @@ SevenSegmentTable   dc.b    $3F,$06,$5B,$4F,$66,$6D,$7D,$27,$7F,$6F
                     include     "collisionDetection.x68"
 
     END    START        ; last line of source
+
 
 
 

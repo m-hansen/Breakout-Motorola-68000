@@ -23,10 +23,12 @@ POS_X           EQU     68
 POS_Y           EQU     64
 
 drawBitmap:
-    movem.l     ALL_REGS,-(sp)          ; Preserve the contents of each register
+    movem.l     ALL_REGS,-(sp)              ; Preserve the contents of each register
     
-    move.l      a6,a0 ; Get the initial location of the bitmap
-    add.l       d4,a0 ; Add the offset to the bitmap address
+    lea         BitmapFile,a0               ; Get the initial location of the bitmap
+    add.l       BitmapImageDataOffset,a0    ; Add the offset to the bitmap address
+    move.l      BitmapWidth,d6
+    move.l      BitmapHeight,d7
     
     * Store the position to start drawing on the horizontal axis
     lea         StartingXDraw,a4
@@ -137,6 +139,7 @@ ReadBitmapHeader:
     move.l      (a0)+,d0
     jsr         reverseBytes
     move.l      d0,d4
+    move.l      d4,BitmapImageDataOffset   
     
 * typedef struct {
 *    unsigned int size;               /* Header size in bytes      */
@@ -156,11 +159,13 @@ ReadBitmapInformationHeader:
     move.l      (a0)+,d0
     jsr         reverseBytes
     move.l      d0,d6
+    move.l      d6,BitmapWidth
     
     * Store the bitmap height and change its endianness
     move.l      (a0)+,d0
     jsr         reverseBytes
     move.l      d0,d7
+    move.l      d7,BitmapHeight
     
     add.l      d4,a0
     
@@ -170,61 +175,10 @@ LoadBitmapStartCoordinate:
     move.l      #BITMAP_TOP_Y,d2            ; Topmost coordinate to begin drawing thr bitmap at
     
 DrawBitmapSections:   
-    * Draw the top left quadrant
     move.l      #0,-(sp)                    ; Push the left clipping position onto the stack for use in the drawBitmap subroutine
     move.l      #0,-(sp)                    ; Push the top clipping position onto the stack
-    move.l      d7,d1                       ; Copy the bitmap height
-    lsr.l       #1,d1                       ; Divide by two
-    move.l      d1,-(sp)                    ; Push the bottom clipping position onto the stack
-    move.l      d6,d1                       ; Copy the bitmap width
-    lsr.l       #1,d1                       ; Divide by two
-    move.l      d1,-(sp)                    ; Push the right clipping position onto the stack
-    move.l      #BITMAP_LEFT_X,-(sp)        ; Push the left coordinate to draw the bitmap onto the stack
-    move.l      #BITMAP_TOP_Y,-(sp)         ; Push the top coordinate to draw the bitmap onto the stack
-    jsr         drawBitmap
-    add.l       #24,sp
-    
-    * Draw the top right quadrant
-    move.l      d6,d1                       ; Copy the bitmap width
-    lsr.l       #1,d1                       ; Divide by two
-    move.l      d1,-(sp)                    ; Push the left clipping position onto the stack for use in the drawBitmap subroutine
-    move.l      #0,-(sp)                    ; Push the top clipping position onto the stack
-    move.l      d7,d1                       ; Copy the bitmap height
-    lsr.l       #1,d1                       ; Divide by two
-    move.l      d1,-(sp)                    ; Push the bottom clipping position onto the stack
-    move.l      d6,d1                       ; Copy the bitmap width
-    move.l      d1,-(sp)                    ; Push the right clipping position onto the stack
-    move.l      #BITMAP_LEFT_X,-(sp)        ; Push the left coordinate to draw the bitmap onto the stack
-    move.l      #BITMAP_TOP_Y,-(sp)         ; Push the top coordinate to draw the bitmap onto the stack
-    jsr         drawBitmap
-    add.l       #24,sp
-    
-    * Draw the bottom right quadrant
-    move.l      d6,d1                       ; Copy the bitmap width
-    lsr.l       #1,d1                       ; Divide by two
-    move.l      d1,-(sp)                    ; Push the left clipping position onto the stack for use in the drawBitmap subroutine
-    move.l      d7,d1                       ; Copy the bitmap height
-    lsr.l       #1,d1                       ; Divide by two
-    move.l      d1,-(sp)                    ; Push the top clipping position onto the stack
-    move.l      d7,d1                       ; Copy the bitmap height
-    move.l      d1,-(sp)                    ; Push the bottom clipping position onto the stack
-    move.l      d6,d1                       ; Copy the bitmap width
-    move.l      d1,-(sp)                    ; Push the right clipping position onto the stack
-    move.l      #BITMAP_LEFT_X,-(sp)        ; Push the left coordinate to draw the bitmap onto the stack
-    move.l      #BITMAP_TOP_Y,-(sp)         ; Push the top coordinate to draw the bitmap onto the stack
-    jsr         drawBitmap
-    add.l       #24,sp
-    
-    * Draw the bottom left quadrant
-    move.l      #0,-(sp)                    ; Push the left clipping position onto the stack for use in the drawBitmap subroutine
-    move.l      d7,d1                       ; Copy the bitmap height
-    lsr.l       #1,d1                       ; Divide by two
-    move.l      d1,-(sp)                    ; Push the top clipping position onto the stack
-    move.l      d7,d1                       ; Copy the bitmap height
-    move.l      d1,-(sp)                    ; Push the bottom clipping position onto the stack
-    move.l      d6,d1                       ; Copy the bitmap width
-    lsr.l       #1,d1                       ; Divide by two
-    move.l      d1,-(sp)                    ; Push the right clipping position onto the stack
+    move.l      BitmapHeight,-(sp)           ; Push the bottom clipping position onto the stack
+    move.l      BitmapWidth,-(sp)          ; Push the right clipping position onto the stack
     move.l      #BITMAP_LEFT_X,-(sp)        ; Push the left coordinate to draw the bitmap onto the stack
     move.l      #BITMAP_TOP_Y,-(sp)         ; Push the top coordinate to draw the bitmap onto the stack
     jsr         drawBitmap
@@ -239,27 +193,11 @@ ErrorNotBitmap:
                         ds.l        0
 BitmapFile              INCBIN      "OriBackground.bmp"
 StartingXDraw           ds.l        1
+BitmapImageDataOffset   ds.l        1
+BitmapWidth             ds.l        1
+BitmapHeight            ds.l        1
 
     *END    Begin        ; last line of source
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
