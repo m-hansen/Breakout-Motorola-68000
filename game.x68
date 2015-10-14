@@ -149,6 +149,38 @@ calculateBallInvalRect:
     add.l       d0,d3
     add.l       d0,d4
     
+    * Draw the image
+    move.l      d1,-(sp)
+    move.l      d2,-(sp)
+    move.l      d4,-(sp)
+    move.l      d3,-(sp)
+    move.l      #BITMAP_LEFT_X,-(sp)
+    move.l      #BITMAP_TOP_Y,-(sp)
+    jsr         drawBitmap
+    add.l       #24,sp
+    
+    movem.l     (sp)+,ALL_REG
+    rts
+    
+calculatePaddleInvalRect:
+    movem.l     ALL_REG,-(sp)
+    move.l      #1,d0               ; Used as padding around the inval rectangle
+
+    * Get the paddle coordinates
+    move.l      PaddlePositionX,d1
+    move.l      #INITIAL_PADDLE_POSITION_Y,d2
+    move.l      d1,d3
+    add.l       #PADDLE_WIDTH,d3
+    move.l      d2,d4
+    add.l       #PADDLE_HEIGHT,d4
+    
+    * Adjust padding for each side
+    sub.l       d0,d1
+    sub.l       d0,d2
+    add.l       d0,d3
+    add.l       d0,d4
+    
+    * Draw the image
     move.l      d1,-(sp)
     move.l      d2,-(sp)
     move.l      d4,-(sp)
@@ -160,19 +192,29 @@ calculateBallInvalRect:
     movem.l     (sp)+,ALL_REG
     rts
     
+    movem.l     (sp)+,ALL_REG
+    rts
+    
 update:
+    * Check if paddle is moving
+    *move.l      PaddleVelocityX,d6
+    *cmpi.l      #0,d6
+    *beq         noUpdateFromPaddle
+    *jsr         calculatePaddleInvalRect
+*noUpdateFromPaddle:
+
     * Update the ball position
     move.l      BallVelocityX,d6
     move.l      BallVelocityY,d7
     
     * Check if the ball is moving
     cmpi.l      #0,d6
-    bne         bkgUpdateNeeded
+    bne         updateNeededFromBall
     cmpi.l      #0,d7
-    beq         noBkgUpdateNeeded
-bkgUpdateNeeded:
+    beq         noUpdateFromBall
+updateNeededFromBall:
     jsr calculateBallInvalRect
-noBkgUpdateNeeded:    
+noUpdateFromBall:  
     
     * Check if the ball is within the bounds of the screen
     cmp.l       #0,d2
@@ -277,11 +319,13 @@ handleInput:
 checkLeftMovement:
     btst.l      #24,d1
     beq         checkRightMovement
+    jsr         calculatePaddleInvalRect
     move.l      -PaddleVelocityX,d0
     add.l       d0,PaddlePositionX
 checkRightMovement:
     btst.l      #16,d1
     beq         checkLaunchKey
+    jsr         calculatePaddleInvalRect
     move.l      PaddleVelocityX,d0
     add.l       d0,PaddlePositionX
 checkLaunchKey:
