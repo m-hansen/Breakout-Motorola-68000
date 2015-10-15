@@ -64,6 +64,7 @@ BRICK_OFFSET_Y              equ     4
 BRICK_OFFSET_ACTIVE         equ     8
 
 BALL_SPEED                  equ     384                 ; 256 * 1.5
+BALL_ACCELERATION           equ     32
 BALL_DIAMETER               equ     20
 BALL_BORDER_COLOR           equ     COLOR_WHITE
 BALL_FILL_COLOR             equ     COLOR_PURPLE
@@ -437,7 +438,7 @@ updateNeededFromBall:
 
     * Ball collided with paddle - Reverse the ball's Y velocity
     move.l      BallVelocityY,d7
-    addi.l      #16,d7
+    addi.l      #BALL_ACCELERATION,d7
     muls.w      #-1,d7
     move.l      d7,BallVelocityY
     move.l      #(INITIAL_PADDLE_POSITION_Y-BALL_DIAMETER-1)<<FRACTIONAL_BITS,d2
@@ -637,8 +638,9 @@ drawHorizontalBricks:
     mulu.w      #BRICK_WIDTH,d4                             ; Multiply by the width to get the horizontal position
     move.l      d1,d5                                       ; Copy the vertical counter
     mulu.w      #BRICK_HEIGHT,d5                            ; Multiply by the height to get the vertical position
-    move.l      d0,d2
+    move.l      d6,d2
     mulu.w      d1,d2                                       ; Multiply the horizontal and vertical counters
+    add.l       d0,d2                                       ; Add horizontal component to result
     mulu.w      #12,d2                                      ; Multiply by the number of longwords stored per entry
     
     * Store brick information in table
