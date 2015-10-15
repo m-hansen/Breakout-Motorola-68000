@@ -437,6 +437,7 @@ updateNeededFromBall:
 
     * Ball collided with paddle - Reverse the ball's Y velocity
     move.l      BallVelocityY,d7
+    addi.l      #16,d7
     muls.w      #-1,d7
     move.l      d7,BallVelocityY
     move.l      #(INITIAL_PADDLE_POSITION_Y-BALL_DIAMETER-1)<<FRACTIONAL_BITS,d2
