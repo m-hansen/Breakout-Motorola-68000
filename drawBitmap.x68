@@ -121,7 +121,7 @@ reverseBytes:
 
 LoadBitmap:
     lea         BitmapFile,a0       ; Load the address of the BitmapFile
-    move.l      a0,a6               ; Save a copy of the original location of the bitmap
+    *move.l      a0,a6               ; Save a copy of the original location of the bitmap
     
 * Read the header data in the bitmap
 ReadBitmapHeader:
@@ -197,6 +197,7 @@ BitmapWidth             ds.l        1
 BitmapHeight            ds.l        1
 
     *END    Begin        ; last line of source
+
 
 
 

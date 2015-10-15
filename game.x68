@@ -434,13 +434,10 @@ updateNeededFromBall:
     
     cmpi.l      #1,d0                   ; The return value from the collision check will be located in register d0, 1 indicates a collision occurred
     bne         skipPaddleCollide
-    
-    move.l      PaddleVelocityY,d7
-    
+
     * Ball collided with paddle - Reverse the ball's Y velocity
-    *asr.l       #FRACTIONAL_BITS,d7
+    move.l      BallVelocityY,d7
     muls.w      #-1,d7
-    *asl.l       #FRACTIONAL_BITS,d7
     move.l      d7,BallVelocityY
     move.l      #(INITIAL_PADDLE_POSITION_Y-BALL_DIAMETER-1)<<FRACTIONAL_BITS,d2
     move.l      #(INITIAL_PADDLE_POSITION_Y-1)<<FRACTIONAL_BITS,d4
@@ -510,16 +507,21 @@ iterateOverBricks:
     * Calculate inval rect
     move.l      d2,-(sp)
     move.l      d3,-(sp)
-    move.l      d2,d0
-    add.l       #BRICK_WIDTH,d0
-    move.l      d0,-(sp)
     move.l      d3,d0
     add.l       #BRICK_HEIGHT,d0
     move.l      d0,-(sp)
-    move.l      #OUTPUT_WINDOW_WIDTH,-(sp)
-    move.l      #OUTPUT_WINDOW_HEIGHT,-(sp)
+    move.l      d2,d0
+    add.l       #BRICK_WIDTH,d0
+    move.l      d0,-(sp)
+    move.l      #BITMAP_LEFT_X,-(sp)
+    move.l      #BITMAP_TOP_Y,-(sp)
     jsr         drawBitmap
     add.l       #24,sp
+    
+    * Reverse ball velocity
+    move.l      BallVelocityY,d0
+    muls.w      #-1,d0
+    move.l      d0,BallVelocityY
     
 nextBrick:
     addi.l      #1,d7
