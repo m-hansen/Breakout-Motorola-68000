@@ -22,9 +22,11 @@ RETURN_CYCLE_COUNT_TRAP     equ     31
 OUTPUT_WINDOW_TRAP          equ     33
 SET_PEN_COLOR_TRAP          equ     80
 SET_FILL_COLOR_TRAP         equ     81
+DRAW_LINE_TRAP              equ     84
 DRAW_RECTANGLE_TRAP         equ     87
 DRAW_ELLIPSE_TRAP           equ     88
 SET_DRAWING_MODE_TRAP       equ     92
+SET_PEN_WIDTH_TRAP          equ     93
 REPAINT_SCREEN_TRAP         equ     94
 DRAW_STRING_GRAPHIC_TRAP    equ     95
 
@@ -42,6 +44,7 @@ COLOR_RED                   equ     $000000FF
 COLOR_WHITE                 equ     $00FFFFFF
 
 PEN_COLOR                   equ     (ALL_REG_SIZE_IN_BYTES+4)
+PEN_WIDTH                   equ     (ALL_REG_SIZE_IN_BYTES+4)
 FILL_COLOR                  equ     (ALL_REG_SIZE_IN_BYTES+4)
 
 PADDLE_WIDTH                equ     125
@@ -61,9 +64,10 @@ BALL_DIAMETER               equ     20
 BALL_BORDER_COLOR           equ     COLOR_WHITE
 BALL_FILL_COLOR             equ     COLOR_PURPLE
 
-LED_POSITION_X              equ     100
-LED_POSITION_Y              equ     100
+LED_POSITION_X              equ     (OUTPUT_WINDOW_WIDTH-40)
+LED_POSITION_Y              equ     (OUTPUT_WINDOW_HEIGHT-40)
 LED_SEGMENT_LENGTH          equ     10
+LED_PEN_SIZE                equ     3
 
 LEFT_ARROW_KEY_CODE         equ     $25
 UP_ARROW_KEY_CODE           equ     $26
@@ -116,6 +120,8 @@ initialize:
     move.l      #INITIAL_PADDLE_POSITION_X,PaddlePositionX
     move.l      #PADDLE_SPEED,PaddleVelocityX
     
+    move.l      #5,Lives
+    
     * Display the bricks
     jsr         seedRandomNumber
     jsr         drawAllBricks
@@ -161,6 +167,7 @@ calculateBallInvalRect:
     movem.l     ALL_REG,-(sp)
     move.l      #3,d0               ; Used as padding around the inval rectangle
     
+    * Get the ball's coordinates
     move.l      BallPositionX,d1
     move.l      BallPositionY,d2
     asr.l       #FRACTIONAL_BITS,d1
@@ -169,13 +176,7 @@ calculateBallInvalRect:
     move.l      d2,d4
     add.l       #BALL_DIAMETER,d3
     add.l       #BALL_DIAMETER,d4
-    
-    * Adjust for fixed point
-    *asr.l       #FRACTIONAL_BITS,d1
-    *asr.l       #FRACTIONAL_BITS,d2
-    *asr.l       #FRACTIONAL_BITS,d3
-    *asr.l       #FRACTIONAL_BITS,d4
-    
+
     * Adjust padding for each side
     sub.l       d0,d1
     sub.l       d0,d2
@@ -250,10 +251,10 @@ calculatePaddleInvalRect:
 clearLED:
     movem.l     ALL_REG,-(sp)
     
-    move.l      #LED_POSITION_X,d1
-    move.l      #LED_POSITION_Y,d2
+    move.l      #LED_POSITION_X-1,d1
+    move.l      #LED_POSITION_Y-1,d2
     move.l      #(LED_POSITION_X+LED_SEGMENT_LENGTH),d3
-    move.l      #(LED_POSITION_Y+LED_SEGMENT_LENGTH),d4
+    move.l      #(LED_POSITION_Y+LED_SEGMENT_LENGTH-1),d4
     
     move.l      d1,-(sp)
     move.l      d2,-(sp)
@@ -270,16 +271,17 @@ clearLED:
 displayLED:
     movem.l     ALL_REG,-(sp)
     lea         SevenSegmentTable,a5
-    move.l      #1,d1                   ; TODO should be the number of lives / score / etc.
-    move.b      (a5,d1),d2              ; Hex value from seven segment table
+    move.l      #0,d6                   ; Initialize counter
+    clr.l       d2
+    move.l      Lives,d1
+    move.b      (a5,d1),d2              ; Hex value from seven segment table                  
 drawSegments:
-    move.l      #0,d0
-    btst.l      d0,d2
+    btst.l      d6,d2
     beq         noSegmentDraw
     jsr         drawLEDSegment
 noSegmentDraw:
-    addi.l      #0,d0
-    cmpi.l      #7,d0
+    addi.l      #1,d6
+    cmpi.l      #7,d6
     blt         drawSegments
     movem.l     (sp)+,ALL_REG
     rts
@@ -290,8 +292,15 @@ drawLEDSegment:
     move.l      #COLOR_RED,-(sp)
     jsr         setPenColor
     add.l       #4,sp
-    
-    * TODO draw each line segment
+
+    lea         LEDSegments,a3
+    move.l      #DRAW_LINE_TRAP,d0
+    asl.l       #4,d6                   ; Multiply the counter by 16 to account for the offset for longwords
+    move.l      0(a3,d6),d1
+    move.l      4(a3,d6),d2
+    move.l      8(a3,d6),d3
+    move.l      12(a3,d6),d4
+    TRAP        #15
     
     movem.l     (sp)+,ALL_REG
     rts
@@ -342,6 +351,9 @@ loseLife:
 * TODO decrement lives, end game if zero, reset ball and paddle position
     muls.w      #-1,d7
     move.l      #(OUTPUT_WINDOW_HEIGHT-BALL_DIAMETER)<<FRACTIONAL_BITS,d2
+    move.l      Lives,d0
+    subi.l      #1,d0
+    move.l      d0,Lives
     *jsr         resetBall
     
 endUpdateBall:
@@ -437,6 +449,9 @@ noUpdateFromBall:
 positionPaddleOnLeft:
     move.l      #1,(a4)                                     ; Re-position the paddle on the left side of the screen
 paddleInBounds:
+
+    jsr         clearLED
+    jsr         displayLED
     
     rts
     
@@ -485,6 +500,16 @@ setPenColor:
     move.l      PEN_COLOR(sp),d1
     TRAP        #15
     movem.l     (sp)+,ALL_REG
+    rts
+    
+setPenWidth:
+    movem.l     d0,-(sp)
+    movem.l     d1,-(sp)
+    move.l      #SET_PEN_WIDTH_TRAP,d0
+    move.l      PEN_WIDTH(sp),d1
+    TRAP        #15
+    movem.l     (sp)+,d1
+    movem.l     (sp)+,d0
     rts
     
 setFillColor:
@@ -642,7 +667,15 @@ PaddleVelocityX     dc.l    1
 PreviousTime        dc.l    0
 CurrentTime         dc.l    0
 DeltaTime           dc.l    0
+Lives               ds.l    1
 WasKeyPressed       ds.b    1
+LEDSegments         dc.l    LED_POSITION_X,LED_POSITION_Y,LED_POSITION_X+LED_SEGMENT_LENGTH,LED_POSITION_Y
+                    dc.l    LED_POSITION_X+LED_SEGMENT_LENGTH,LED_POSITION_Y,LED_POSITION_X+LED_SEGMENT_LENGTH,LED_POSITION_Y+LED_SEGMENT_LENGTH
+                    dc.l    LED_POSITION_X+LED_SEGMENT_LENGTH,LED_POSITION_Y+LED_SEGMENT_LENGTH,LED_POSITION_X+LED_SEGMENT_LENGTH,LED_POSITION_Y+(LED_SEGMENT_LENGTH*2)
+                    dc.l    LED_POSITION_X,LED_POSITION_Y+(LED_SEGMENT_LENGTH*2),LED_POSITION_X+LED_SEGMENT_LENGTH,LED_POSITION_Y+(LED_SEGMENT_LENGTH*2)
+                    dc.l    LED_POSITION_X,LED_POSITION_Y+LED_SEGMENT_LENGTH,LED_POSITION_X,LED_POSITION_Y+(LED_SEGMENT_LENGTH*2)
+                    dc.l    LED_POSITION_X,LED_POSITION_Y,LED_POSITION_X,LED_POSITION_Y+LED_SEGMENT_LENGTH
+                    dc.l    LED_POSITION_X,LED_POSITION_Y+LED_SEGMENT_LENGTH,LED_POSITION_X+LED_SEGMENT_LENGTH,LED_POSITION_Y+LED_SEGMENT_LENGTH
 SevenSegmentTable   dc.b    $3F,$06,$5B,$4F,$66,$6D,$7D,$27,$7F,$6F
                     ds.l    0
                     include     "drawBitmap.x68"
