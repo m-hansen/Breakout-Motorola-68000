@@ -58,6 +58,10 @@ INITIAL_PADDLE_POSITION_Y   equ     (OUTPUT_WINDOW_HEIGHT-20)
 BRICK_WIDTH                 equ     128
 BRICK_HEIGHT                equ     30
 NUMBER_OF_BRICK_ROWS        equ     4
+NUMBER_OF_BRICK_COLUMNS     equ     10
+BRICK_OFFSET_X              equ     0
+BRICK_OFFSET_Y              equ     4
+BRICK_OFFSET_ACTIVE         equ     8
 
 BALL_SPEED                  equ     384                 ; 256 * 1.5
 BALL_DIAMETER               equ     20
@@ -76,6 +80,9 @@ DOWN_ARROW_KEY_CODE         equ     $28
 SPACEBAR_KEY_CODE           equ     $20
 
 LARGE_NUMBER_FOR_SEED       equ     $5678
+
+LOADING_TEXT_X              equ     20
+LOADING_TEXT_Y              equ     20
 
 * Argument stack offsets for use with collision detection function
 COLLISION_OBJ_A_LEFT        equ     (ALL_REG_SIZE_IN_BYTES+32)
@@ -107,8 +114,8 @@ initialize:
     * Display loading text
     move.l      #DRAW_STRING_GRAPHIC_TRAP,d0
     lea         LoadingText,a1              ; Location of the string to draw
-    move.w      #20,d1                      ; X position to draw at
-    move.w      #20,d2                      ; Y position to draw at
+    move.w      #LOADING_TEXT_X,d1
+    move.w      #LOADING_TEXT_Y,d2
     TRAP        #15
     jsr         swapBuffers
     
@@ -253,8 +260,8 @@ clearLED:
     
     move.l      #LED_POSITION_X-1,d1
     move.l      #LED_POSITION_Y-1,d2
-    move.l      #(LED_POSITION_X+LED_SEGMENT_LENGTH),d3
-    move.l      #(LED_POSITION_Y+LED_SEGMENT_LENGTH-1),d4
+    move.l      #(LED_POSITION_X+LED_SEGMENT_LENGTH+1),d3
+    move.l      #(LED_POSITION_Y+(LED_SEGMENT_LENGTH*2)+1),d4
     
     move.l      d1,-(sp)
     move.l      d2,-(sp)
@@ -348,13 +355,12 @@ ballReflectTopBound:
     jmp         endUpdateBall
     
 loseLife:
-* TODO decrement lives, end game if zero, reset ball and paddle position
-    muls.w      #-1,d7
-    move.l      #(OUTPUT_WINDOW_HEIGHT-BALL_DIAMETER)<<FRACTIONAL_BITS,d2
     move.l      Lives,d0
     subi.l      #1,d0
     move.l      d0,Lives
-    *jsr         resetBall
+    cmpi.l      #0,d0               ; Check if out of lives
+    ble         initialize          ; Reset game when no lives left
+    jsr         resetBall
     
 endUpdateBall:
     move.l      d1,BallPositionX
@@ -402,13 +408,13 @@ update:
 updateNeededFromBall:
     jsr         updateBall
     move.l      BallPositionX,d1
-    move.l      BallPositionX,d2
+    move.l      BallPositionY,d2
     jsr         calculateBallInvalRect
     
     * Check for a collision between the ball and paddle
     * Pass in the location of the paddle as objectA
     move.l      (a4),d0                                     ; Make a copy of PaddlePositionX
-    asr.l       #FRACTIONAL_BITS,d0
+    asl.l       #FRACTIONAL_BITS,d0
     move.l      d0,-(sp)
     move.l      #INITIAL_PADDLE_POSITION_Y<<FRACTIONAL_BITS,-(sp)
     add.l       #PADDLE_WIDTH<<FRACTIONAL_BITS,d0
@@ -427,15 +433,20 @@ updateNeededFromBall:
     add.l       #32,sp
     
     cmpi.l      #1,d0                   ; The return value from the collision check will be located in register d0, 1 indicates a collision occurred
-    bne         skipCollide
+    bne         skipPaddleCollide
+    
+    move.l      PaddleVelocityY,d7
     
     * Ball collided with paddle - Reverse the ball's Y velocity
+    *asr.l       #FRACTIONAL_BITS,d7
     muls.w      #-1,d7
+    *asl.l       #FRACTIONAL_BITS,d7
     move.l      d7,BallVelocityY
     move.l      #(INITIAL_PADDLE_POSITION_Y-BALL_DIAMETER-1)<<FRACTIONAL_BITS,d2
     move.l      #(INITIAL_PADDLE_POSITION_Y-1)<<FRACTIONAL_BITS,d4
     
-skipCollide:
+skipPaddleCollide:
+    jsr         checkForCollisionWithBricks
 noUpdateFromBall:  
     
     * Keep the paddle within the bounds of the screen
@@ -455,6 +466,69 @@ paddleInBounds:
     
     rts
     
+checkForCollisionWithBricks:
+    movem.l     ALL_REG,-(sp)
+    lea         Bricks,a6
+    move.l      #0,d7                               ; The counter
+    move.l      #(BrickEnd-Bricks),d1
+iterateOverBricks:
+    move.l      d7,d6                               ; Copy the counter
+    mulu.w      #12,d6                               ; Multiply counter by 12 for longword offset
+    move.l      BRICK_OFFSET_ACTIVE(a6,d6),d4
+    cmpi.l      #1,d4                               ; Check if the brick is active first
+    bne         nextBrick
+    move.l      BRICK_OFFSET_X(a6,d6),d2
+    move.l      BRICK_OFFSET_Y(a6,d6),d3
+    
+    * Pass location of brick as objectA
+    move.l      d2,-(sp)
+    move.l      d3,-(sp)
+    move.l      d2,d0
+    add.l       #BRICK_WIDTH,d0
+    move.l      d0,-(sp)
+    move.l      d3,d0
+    add.l       #BRICK_HEIGHT,d0
+    move.l      d0,-(sp)
+    * Pass location of ball as objectB
+    move.l      BallPositionX,d5
+    move.l      BallPositionY,d4
+    lsr.l       #FRACTIONAL_BITS,d5
+    lsr.l       #FRACTIONAL_BITS,d4
+    move.l      d5,-(sp)
+    move.l      d4,-(sp)
+    add.l       #BALL_DIAMETER,d5
+    move.l      d5,-(sp)
+    add.l       #BALL_DIAMETER,d4
+    move.l      d4,-(sp)
+    jsr         checkForCollision
+    add.l       #32,sp
+    
+    cmpi.l      #1,d0                               ; 1 if collision occured
+    bne         nextBrick
+    move.l      #0,BRICK_OFFSET_ACTIVE(a6,d6)       ; Collision occured, mark the brick as inactive
+    
+    * Calculate inval rect
+    move.l      d2,-(sp)
+    move.l      d3,-(sp)
+    move.l      d2,d0
+    add.l       #BRICK_WIDTH,d0
+    move.l      d0,-(sp)
+    move.l      d3,d0
+    add.l       #BRICK_HEIGHT,d0
+    move.l      d0,-(sp)
+    move.l      #OUTPUT_WINDOW_WIDTH,-(sp)
+    move.l      #OUTPUT_WINDOW_HEIGHT,-(sp)
+    jsr         drawBitmap
+    add.l       #24,sp
+    
+nextBrick:
+    addi.l      #1,d7
+    cmp.l       d1,d7
+    blt         iterateOverBricks
+    
+    movem.l     (sp)+,ALL_REG
+    rts
+    
 draw:
     jsr         drawBall
     jsr         drawPaddle
@@ -472,14 +546,14 @@ checkLeftMovement:
     beq         checkRightMovement
     jsr         calculatePaddleInvalRect
     move.l      -PaddleVelocityX,d0
-    mulu.w      (a5),d0
+    *mulu.w      (a5),d0
     add.l       d0,PaddlePositionX
 checkRightMovement:
     btst.l      #16,d1
     beq         checkLaunchKey
     jsr         calculatePaddleInvalRect
     move.l      PaddleVelocityX,d0
-    mulu.w      (a5),d0
+    *mulu.w      (a5),d0
     add.l       d0,PaddlePositionX
 checkLaunchKey:
     btst.l      #8,d1
@@ -554,11 +628,21 @@ drawAllBricks:
     subi.l      #1,d0                                       ; Immediately dectement the horizontal loop counter so it won't exceed the bounds
     move.l      d7,d1                                       ; The vertical counter to be decremented
     subi.l      #1,d1                                       ; Immediately dectement the vertical loop counter so it won't exceed the bounds
+    lea         Bricks,a0
 drawHorizontalBricks:
     move.l      d0,d4                                       ; Copy the horizontal counter
     mulu.w      #BRICK_WIDTH,d4                             ; Multiply by the width to get the horizontal position
     move.l      d1,d5                                       ; Copy the vertical counter
     mulu.w      #BRICK_HEIGHT,d5                            ; Multiply by the height to get the vertical position
+    move.l      d0,d2
+    mulu.w      d1,d2                                       ; Multiply the horizontal and vertical counters
+    mulu.w      #12,d2                                      ; Multiply by the number of longwords stored per entry
+    
+    * Store brick information in table
+    move.l      d4,BRICK_OFFSET_X(a0,d2)
+    move.l      d5,BRICK_OFFSET_Y(a0,d2)
+    move.l      #1,BRICK_OFFSET_ACTIVE(a0,d2)               ; Enable the brick by default
+    
     move.l      d4,-(sp)
     move.l      d5,-(sp)
     jsr         drawBrick
@@ -668,7 +752,8 @@ PreviousTime        dc.l    0
 CurrentTime         dc.l    0
 DeltaTime           dc.l    0
 Lives               ds.l    1
-WasKeyPressed       ds.b    1
+Bricks              ds.l    NUMBER_OF_BRICK_ROWS*NUMBER_OF_BRICK_COLUMNS*3
+BrickEnd            ds.l    0
 LEDSegments         dc.l    LED_POSITION_X,LED_POSITION_Y,LED_POSITION_X+LED_SEGMENT_LENGTH,LED_POSITION_Y
                     dc.l    LED_POSITION_X+LED_SEGMENT_LENGTH,LED_POSITION_Y,LED_POSITION_X+LED_SEGMENT_LENGTH,LED_POSITION_Y+LED_SEGMENT_LENGTH
                     dc.l    LED_POSITION_X+LED_SEGMENT_LENGTH,LED_POSITION_Y+LED_SEGMENT_LENGTH,LED_POSITION_X+LED_SEGMENT_LENGTH,LED_POSITION_Y+(LED_SEGMENT_LENGTH*2)
