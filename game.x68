@@ -29,6 +29,7 @@ REPAINT_SCREEN_TRAP         equ     94
 DRAW_STRING_GRAPHIC_TRAP    equ     95
 
 FRACTIONAL_BITS             equ     8
+FRACTIONAL_MULTIPLIER       equ     256
 
 OUTPUT_WINDOW_WIDTH         equ     1280
 OUTPUT_WINDOW_HEIGHT        equ     720
@@ -45,7 +46,7 @@ FILL_COLOR                  equ     (ALL_REG_SIZE_IN_BYTES+4)
 
 PADDLE_WIDTH                equ     125
 PADDLE_HEIGHT               equ     15
-PADDLE_SPEED                equ     1<<FRACTIONAL_BITS
+PADDLE_SPEED                equ     1
 PADDLE_BORDER_COLOR         equ     COLOR_BLACK
 PADDLE_FILL_COLOR           equ     COLOR_WHITE
 INITIAL_PADDLE_POSITION_X   equ     ((OUTPUT_WINDOW_WIDTH>>1)-(PADDLE_WIDTH>>1))
@@ -55,6 +56,7 @@ BRICK_WIDTH                 equ     128
 BRICK_HEIGHT                equ     30
 NUMBER_OF_BRICK_ROWS        equ     4
 
+BALL_SPEED                  equ     384                 ; 256 * 1.5
 BALL_DIAMETER               equ     20
 BALL_BORDER_COLOR           equ     COLOR_WHITE
 BALL_FILL_COLOR             equ     COLOR_PURPLE
@@ -67,7 +69,7 @@ LEFT_ARROW_KEY_CODE         equ     $25
 UP_ARROW_KEY_CODE           equ     $26
 RIGHT_ARROW_KEY_CODE        equ     $27
 DOWN_ARROW_KEY_CODE         equ     $28
-SPACEBAR_KEY_CODE           equ     ' '
+SPACEBAR_KEY_CODE           equ     $20
 
 LARGE_NUMBER_FOR_SEED       equ     $5678
 
@@ -110,19 +112,27 @@ initialize:
     jsr         LoadBitmap
     jsr         swapBuffers
     
-    * Initialize paddle position
+    * Initialize paddle position and velocity
     move.l      #INITIAL_PADDLE_POSITION_X,PaddlePositionX
+    move.l      #PADDLE_SPEED,PaddleVelocityX
     
     * Display the bricks
     jsr         seedRandomNumber
     jsr         drawAllBricks
     
-    move.l      #PADDLE_SPEED,PaddleVelocityX
-    
     * Initialize ball position and velocity
-    lea         BallVelocityX,a5
-    lea         BallVelocityY,a6
-    jsr         resetBall
+    move.l      #0,d6
+    move.l      #0,d7
+    move.l      #((OUTPUT_WINDOW_WIDTH>>1)-(BALL_DIAMETER>>1))<<FRACTIONAL_BITS,d1
+    move.l      #((OUTPUT_WINDOW_HEIGHT>>1)-(BALL_DIAMETER>>1))<<FRACTIONAL_BITS,d2
+    move.l      d1,d3
+    add.l       #BALL_DIAMETER<<FRACTIONAL_BITS,d3
+    move.l      d2,d4
+    add.l       #BALL_DIAMETER<<FRACTIONAL_BITS,d4
+    move.l      d1,BallPositionX
+    move.l      d2,BallPositionY
+    move.l      d6,BallVelocityX
+    move.l      d7,BallVelocityY
 
 gameLoop:
     *jsr clearScreen
@@ -149,7 +159,22 @@ swapBuffers:
 * Calculate the inval rect   
 calculateBallInvalRect:
     movem.l     ALL_REG,-(sp)
-    move.l      #1,d0               ; Used as padding around the inval rectangle
+    move.l      #3,d0               ; Used as padding around the inval rectangle
+    
+    move.l      BallPositionX,d1
+    move.l      BallPositionY,d2
+    asr.l       #FRACTIONAL_BITS,d1
+    asr.l       #FRACTIONAL_BITS,d2
+    move.l      d1,d3
+    move.l      d2,d4
+    add.l       #BALL_DIAMETER,d3
+    add.l       #BALL_DIAMETER,d4
+    
+    * Adjust for fixed point
+    *asr.l       #FRACTIONAL_BITS,d1
+    *asr.l       #FRACTIONAL_BITS,d2
+    *asr.l       #FRACTIONAL_BITS,d3
+    *asr.l       #FRACTIONAL_BITS,d4
     
     * Adjust padding for each side
     sub.l       d0,d1
@@ -157,6 +182,24 @@ calculateBallInvalRect:
     add.l       d0,d3
     add.l       d0,d4
     
+    * Keep the inval rectangle within the bounds of the screen
+    cmpi.l      #0,d1
+    bgt         skipLeftBoundFix
+    move.l      #0,d1
+skipLeftBoundFix:
+    cmpi.l      #0,d2
+    bgt         skipTopBoundFix
+    move.l      #0,d2
+skipTopBoundFix:
+    cmpi.l      #OUTPUT_WINDOW_WIDTH,d3
+    blt         skipRightBoundFix
+    move.l      #OUTPUT_WINDOW_WIDTH,d3
+skipRightBoundFix:
+    cmpi.l      #OUTPUT_WINDOW_HEIGHT,d4
+    blt         skipBottomBoundFix
+    move.l      #OUTPUT_WINDOW_HEIGHT,d4
+skipBottomBoundFix:
+
     * Draw the image
     move.l      d1,-(sp)
     move.l      d2,-(sp)
@@ -252,11 +295,78 @@ drawLEDSegment:
     
     movem.l     (sp)+,ALL_REG
     rts
+
+updateBall:
+    movem.l     ALL_REG,-(sp)
     
+    move.l      BallPositionX,d1
+    move.l      BallPositionY,d2
+    
+    move.l      BallVelocityX,d6
+    move.l      BallVelocityY,d7
+    
+    * Multiply the velocity by delta time
+    *muls.w      d0,d6
+    *muls.w      d0,d7
+    
+    add.l       d6,d1       ; Update the X position
+    add.l       d7,d2       ; Update the Y position
+    
+    * Check if the ball is within the bounds of the screen
+    cmp.l       #0,d1
+    blt         ballReflectLeftBound
+    cmp.l       #0,d2
+    blt         ballReflectTopBound
+    cmp.l       #(OUTPUT_WINDOW_WIDTH-BALL_DIAMETER)<<FRACTIONAL_BITS,d1
+    bgt         ballReflectRightBound
+    cmp.l       #(OUTPUT_WINDOW_HEIGHT-BALL_DIAMETER)<<FRACTIONAL_BITS,d2
+    bgt         loseLife
+    jmp         endUpdateBall
+    
+ballReflectLeftBound:
+    muls.w      #-1,d6
+    move.l      #0,d1
+    jmp         endUpdateBall
+    
+ballReflectRightBound:
+    muls.w      #-1,d6
+    move.l      #(OUTPUT_WINDOW_WIDTH-BALL_DIAMETER)<<FRACTIONAL_BITS,d1
+    jmp         endUpdateBall
+    
+ballReflectTopBound:
+    muls.w      #-1,d7
+    move.l      #0,d2
+    jmp         endUpdateBall
+    
+loseLife:
+* TODO decrement lives, end game if zero, reset ball and paddle position
+    muls.w      #-1,d7
+    move.l      #(OUTPUT_WINDOW_HEIGHT-BALL_DIAMETER)<<FRACTIONAL_BITS,d2
+    *jsr         resetBall
+    
+endUpdateBall:
+    move.l      d1,BallPositionX
+    move.l      d2,BallPositionY
+    move.l      d6,BallVelocityX
+    move.l      d7,BallVelocityY
+    movem.l     (sp)+,ALL_REG
+    rts
+    
+resetBall:
+    jsr         calculateBallInvalRect
+    move.l      #0,d6
+    move.l      #0,d7
+    move.l      #((OUTPUT_WINDOW_WIDTH>>1)-(BALL_DIAMETER>>1))<<FRACTIONAL_BITS,d1
+    move.l      #((OUTPUT_WINDOW_HEIGHT>>1)-(BALL_DIAMETER>>1))<<FRACTIONAL_BITS,d2
+    move.l      d1,d3
+    add.l       #BALL_DIAMETER<<FRACTIONAL_BITS,d3
+    move.l      d2,d4
+    add.l       #BALL_DIAMETER<<FRACTIONAL_BITS,d4
+    rts
     
 update:
-    * Save off ball position
-    move.l      d1,BallPositionX
+    lea         BallPositionX,a5
+    lea         BallPositionY,a6
     
     * Save off the previous time
     move.l      CurrentTime,d0
@@ -267,35 +377,54 @@ update:
     move.l      d1,CurrentTime
     * Calculate delta time
     sub.l       PreviousTime,d1
-    move.l      d1,(DeltaTime)
+    lsl.l       #2,d1
+    move.l      d1,DeltaTime
     
-    move.l      BallPositionX,d1
-
-    * Update the ball position
-    move.l      BallVelocityX,d6
-    move.l      BallVelocityY,d7
-    
+    move.l      d1,d0               ; Delta time is stored in d0 for the update function
+  
     * Check if the ball is moving
-    cmpi.l      #0,d6
+    cmpi.l      #0,BallVelocityX
     bne         updateNeededFromBall
-    cmpi.l      #0,d7
+    cmpi.l      #0,BallVelocityY
     beq         noUpdateFromBall
 updateNeededFromBall:
-    jsr calculateBallInvalRect
+    jsr         updateBall
+    move.l      BallPositionX,d1
+    move.l      BallPositionX,d2
+    jsr         calculateBallInvalRect
+    
+    * Check for a collision between the ball and paddle
+    * Pass in the location of the paddle as objectA
+    move.l      (a4),d0                                     ; Make a copy of PaddlePositionX
+    asr.l       #FRACTIONAL_BITS,d0
+    move.l      d0,-(sp)
+    move.l      #INITIAL_PADDLE_POSITION_Y<<FRACTIONAL_BITS,-(sp)
+    add.l       #PADDLE_WIDTH<<FRACTIONAL_BITS,d0
+    move.l      d0,-(sp)
+    move.l      #(INITIAL_PADDLE_POSITION_Y+PADDLE_HEIGHT)<<FRACTIONAL_BITS,-(sp)
+    * Pass in the location of the ball as objectB
+    move.l      d1,-(sp)
+    move.l      d2,-(sp)
+    move.l      d1,d3                   ; Copy the X position
+    addi.l      #BALL_DIAMETER<<FRACTIONAL_BITS,d3       ; Account for the size
+    move.l      d3,-(sp)
+    move.l      d2,d4                   ; Copy the y position
+    addi.l      #BALL_DIAMETER<<FRACTIONAL_BITS,d4       ; Account for the size
+    move.l      d4,-(sp)
+    jsr         checkForCollision
+    add.l       #32,sp
+    
+    cmpi.l      #1,d0                   ; The return value from the collision check will be located in register d0, 1 indicates a collision occurred
+    bne         skipCollide
+    
+    * Ball collided with paddle - Reverse the ball's Y velocity
+    muls.w      #-1,d7
+    move.l      d7,BallVelocityY
+    move.l      #(INITIAL_PADDLE_POSITION_Y-BALL_DIAMETER-1)<<FRACTIONAL_BITS,d2
+    move.l      #(INITIAL_PADDLE_POSITION_Y-1)<<FRACTIONAL_BITS,d4
+    
+skipCollide:
 noUpdateFromBall:  
-    
-    * Check if the ball is within the bounds of the screen
-    cmp.l       #0,d2
-    blt         ballReflectTopBound
-    cmp.l       #0,d1
-    blt         ballReflectLeftBound
-    cmp.l       #(OUTPUT_WINDOW_WIDTH-BALL_DIAMETER),d1
-    bgt         ballReflectRightBound
-    cmp.l       #(OUTPUT_WINDOW_HEIGHT-BALL_DIAMETER),d2
-    bgt         loseLife
-    
-    add.l       d6,d1
-    add.l       d7,d2
     
     * Keep the paddle within the bounds of the screen
     lea         PaddlePositionX,a4
@@ -309,80 +438,11 @@ positionPaddleOnLeft:
     move.l      #1,(a4)                                     ; Re-position the paddle on the left side of the screen
 paddleInBounds:
     
-    * Check for a collision between the ball and paddle
-    * Pass in the location of the paddle as objectA
-    move.l      (a4),d0                                     ; Make a copy of PaddlePositionX
-    move.l      d0,-(sp)
-    move.l      #INITIAL_PADDLE_POSITION_Y,-(sp)
-    add.l       #PADDLE_WIDTH,d0
-    move.l      d0,-(sp)
-    move.l      #(INITIAL_PADDLE_POSITION_Y+PADDLE_HEIGHT),-(sp)
-    * Pass in the location of the ball as objectB
-    move.l      d1,-(sp)
-    move.l      d2,-(sp)
-    move.l      d1,d3                   ; Copy the X position
-    addi.l      #BALL_DIAMETER,d3       ; Account for the size
-    move.l      d3,-(sp)
-    move.l      d2,d4                   ; Copy the y position
-    addi.l      #BALL_DIAMETER,d4       ; Account for the size
-    move.l      d4,-(sp)
-    jsr         checkForCollision
-    add.l       #32,sp
-    
-    cmpi.l      #1,d0                   ; The return value from the collision check will be located in register d0, 1 indicates a collision occurred
-    bne         skipCollide
-    *jsr         resetBall
-    muls.w      #-1,d7
-    move.l      d7,BallVelocityY
-    move.l      #INITIAL_PADDLE_POSITION_Y-BALL_DIAMETER-1,d2
-    move.l      #INITIAL_PADDLE_POSITION_Y-1,d4
-    
-skipCollide:
-
-    rts
-    
-resetBall:
-    move.l      #0,BallVelocityX
-    move.l      #0,BallVelocityY
-    move.l      #((OUTPUT_WINDOW_WIDTH>>1)-(BALL_DIAMETER>>1)),d1
-    move.l      #((OUTPUT_WINDOW_HEIGHT>>1)-(BALL_DIAMETER>>1)),d2
-    move.l      d1,d3
-    add.l       #BALL_DIAMETER,d3
-    move.l      d2,d4
-    add.l       #BALL_DIAMETER,d4
-    move.l      d1,BallPositionX
-    move.l      d2,BallPositionY
-    rts
-    
-ballReflectLeftBound:
-    muls.w      #-1,d6
-    move.l      d6,BallVelocityX
-    move.l      #0,d1
-    rts
-    
-ballReflectRightBound:
-    muls.w      #-1,d6
-    move.l      d6,BallVelocityX
-    move.l      #(OUTPUT_WINDOW_WIDTH-BALL_DIAMETER),d1
-    rts
-    
-ballReflectTopBound:
-    muls.w      #-1,d7
-    move.l      d7,BallVelocityY
-    move.l      #0,d2
-    rts
-    
-loseLife:
-* TODO decrement lives, end game if zero, reset ball and paddle position
-    muls.w      #-1,d7
-    move.l      d7,BallVelocityY
-    move.l      #(OUTPUT_WINDOW_HEIGHT-BALL_DIAMETER),d2
-    jsr         resetBall
     rts
     
 draw:
-    jsr drawBall
-    jsr drawPaddle
+    jsr         drawBall
+    jsr         drawPaddle
     rts
     
 handleInput:
@@ -397,19 +457,19 @@ checkLeftMovement:
     beq         checkRightMovement
     jsr         calculatePaddleInvalRect
     move.l      -PaddleVelocityX,d0
-    *mulu.w      DeltaTime,d0
+    mulu.w      (a5),d0
     add.l       d0,PaddlePositionX
 checkRightMovement:
     btst.l      #16,d1
     beq         checkLaunchKey
     jsr         calculatePaddleInvalRect
     move.l      PaddleVelocityX,d0
-    *mulu.w      DeltaTime,d0
+    mulu.w      (a5),d0
     add.l       d0,PaddlePositionX
 checkLaunchKey:
     btst.l      #8,d1
     beq         checkResetKey
-    move.l      #1,d0
+    move.l      #BALL_SPEED,d0
     move.l      d0,BallVelocityX
     move.l      d0,BallVelocityY
 checkResetKey:
@@ -436,7 +496,7 @@ setFillColor:
     rts
     
 drawBall:
-    *movem.l     ALL_REG,-(sp)
+    movem.l     ALL_REG,-(sp)
     move.l      #DRAW_ELLIPSE_TRAP,d0
     
     * Set the ball border color
@@ -449,12 +509,16 @@ drawBall:
     jsr         setFillColor
     add.l       #4,sp
     
-   * move.w      #0,d1
-   * move.w      #0,d2
-   * move.w      #BALL_DIAMETER,d3
-   * move.w      #BALL_DIAMETER,d4
+    move.l      BallPositionX,d1
+    move.l      BallPositionY,d2
+    asr.l       #FRACTIONAL_BITS,d1
+    asr.l       #FRACTIONAL_BITS,d2
+    move.l      d1,d3
+    addi.l      #BALL_DIAMETER,d3
+    move.l      d2,d4
+    addi.l      #BALL_DIAMETER,d4
     TRAP        #15
-    *movem.l     (sp)+,ALL_REG
+    movem.l     (sp)+,ALL_REG
     rts
     
 drawAllBricks:
@@ -585,6 +649,8 @@ SevenSegmentTable   dc.b    $3F,$06,$5B,$4F,$66,$6D,$7D,$27,$7F,$6F
                     include     "collisionDetection.x68"
 
     END    START        ; last line of source
+
+
 
 
 

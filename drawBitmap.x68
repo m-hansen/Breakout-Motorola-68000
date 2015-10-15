@@ -3,7 +3,6 @@
 ALL_REGS                REG     D0-D7/A0-A6
 ALL_REGS_BYTES          EQU     60
 
-
 PEN_COLOR_TRAP_CODE     EQU     80
 DRAW_PIXEL_TRAP_CODE    EQU     82
 
@@ -198,6 +197,8 @@ BitmapWidth             ds.l        1
 BitmapHeight            ds.l        1
 
     *END    Begin        ; last line of source
+
+
 
 
 
